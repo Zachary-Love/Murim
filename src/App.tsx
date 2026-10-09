@@ -3,10 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Settings from "./Settings";
 import Caffeine from "./Caffeine";
-import Inbox, { Item, Repo, Session, Mode, repoName } from "./Inbox";
+import Inbox, { Item, Repo, Session, Mode, PrMap, SEV, repoName } from "./Inbox";
 import TaskPane from "./TaskPane";
 
 type Payload = { items: Item[]; error: string | null };
+type PrPayload = { prs: PrMap; error?: string | null };
 const NONE = "\0none";
 
 export default function App() {
@@ -16,6 +17,8 @@ export default function App() {
   const [sel, setSel] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Record<string, Session>>({});
   const [mode, setMode] = useState<Mode>("normal");
+  const [prs, setPrs] = useState<PrMap>({});
+  const [prErr, setPrErr] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   useEffect(() => {
     invoke<Record<string, Session>>("get_sessions").then(setSessions).catch(() => {});
@@ -24,12 +27,16 @@ export default function App() {
     invoke<Payload>("get_inbox").then(setP);
     invoke<Repo[]>("list_repos").then(setRepos).catch(() => {});
     const un = listen<Payload>("inbox-updated", (e) => setP(e.payload));
-    return () => { un.then((f) => f()); us.then((f) => f()); };
+    const setPp = (v: PrPayload) => { setPrs(v.prs ?? {}); setPrErr(v.error ?? null); };
+    invoke<PrPayload>("get_prs").then(setPp).catch(() => {}); // ponytail: tolerate backend without get_prs
+    const up = listen<PrPayload>("prs-updated", (e) => setPp(e.payload));
+    return () => { un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); };
   }, []);
 
   const counts = new Map<string, number>();
   for (const i of p.items) counts.set(repoName(i) || NONE, (counts.get(repoName(i) || NONE) ?? 0) + 1);
   const groups = [...counts].sort(([a], [b]) => (a === NONE ? 1 : b === NONE ? -1 : a.localeCompare(b)));
+  const red = new Set(p.items.filter((i) => SEV[prs[i.issue.id]?.overall] === "red").map((i) => repoName(i) || NONE));
   const shown = sel ? p.items.filter((i) => (repoName(i) || NONE) === sel) : p.items;
 
   const openItem = p.items.find((i) => i.issue.id === open);
@@ -44,7 +51,7 @@ export default function App() {
           <li className={sel === null ? "on" : ""} onClick={() => { setSel(null); setShowSettings(false); }}>All <span>{p.items.length}</span></li>
           {groups.map(([g, n]) => (
             <li key={g} className={sel === g ? "on" : ""} onClick={() => { setSel(g); setShowSettings(false); }}>
-              {g === NONE ? "No repo" : g} <span>{n}</span>
+              {g === NONE ? "No repo" : g}{red.has(g) && <i className="dot" />} <span>{n}</span>
             </li>
           ))}
         </ul>
@@ -52,11 +59,12 @@ export default function App() {
       </aside>
       <main className="main">
         {showSettings ? <Settings /> : openItem ? (
-          <TaskPane key={openItem.issue.id} item={openItem} session={sessions[openItem.issue.id]} onBack={() => setOpen(null)} />
+          <TaskPane key={openItem.issue.id} item={openItem} session={sessions[openItem.issue.id]} pr={prs[openItem.issue.id]} onBack={() => setOpen(null)} />
         ) : (
           <>
+            {prErr && <div className="banner">{prErr}</div>}
             {p.error && <div className="banner">{p.error}</div>}
-            <Inbox items={shown} repos={repos} sessions={sessions} defaultMode={mode} onOpen={setOpen} />
+            <Inbox items={shown} repos={repos} sessions={sessions} prs={prs} defaultMode={mode} onOpen={setOpen} />
           </>
         )}
       </main>

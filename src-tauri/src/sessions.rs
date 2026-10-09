@@ -109,33 +109,43 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
     if let Some((t, b)) = note {
         notify(app, t, b);
     }
+    if ev["hook_event_name"] == "Stop" {
+        crate::github::poke(app);
+    }
 }
 
 // ---- environment ----
 
 /// (PATH, absolute claude path) from the login shell, once. GUI apps on macOS don't inherit shell PATH.
-fn shell_env() -> &'static (String, Option<String>) {
-    static E: OnceLock<(String, Option<String>)> = OnceLock::new();
+/// The user's interactive login-shell environment (GUI apps don't inherit it): PATH, GITHUB_TOKEN, etc.
+/// Passed whole to `claude` and `gh` so they behave like they do in the user's terminal.
+pub fn shell_env() -> &'static (Vec<(String, String)>, Option<String>) {
+    static E: OnceLock<(Vec<(String, String)>, Option<String>)> = OnceLock::new();
     E.get_or_init(|| {
         let sh = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
         let out = Command::new(sh)
-            .args(["-lic", r#"echo "MURIM_PATH=$PATH"; echo "MURIM_CLAUDE=$(command -v claude)""#])
+            .args(["-lic", r#"echo "MURIM_CLAUDE=$(command -v claude)"; echo __MURIM_ENV__; env -0"#])
             .stdin(std::process::Stdio::null())
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
             .unwrap_or_default();
-        parse_shell_env(&out, &std::env::var("PATH").unwrap_or_default())
+        parse_shell_env(&out)
     })
 }
 
-fn parse_shell_env(out: &str, fallback_path: &str) -> (String, Option<String>) {
-    let get = |k: &str| out.lines().rev().find_map(|l| l.strip_prefix(k)).map(str::trim).filter(|v| !v.is_empty()).map(String::from);
-    (get("MURIM_PATH=").unwrap_or_else(|| fallback_path.to_string()), get("MURIM_CLAUDE=").filter(|p| p.starts_with('/')))
+/// Falls back to Murim's own env if the shell produced nothing usable.
+fn parse_shell_env(out: &str) -> (Vec<(String, String)>, Option<String>) {
+    let claude = out.lines().find_map(|l| l.strip_prefix("MURIM_CLAUDE=")).map(str::trim).filter(|p| p.starts_with('/')).map(String::from);
+    let vars: Vec<(String, String)> = out
+        .split_once("__MURIM_ENV__\n")
+        .map(|(_, env)| env.split('\0').filter_map(|kv| kv.split_once('=')).filter(|(k, _)| !k.is_empty() && !k.contains('\n')).map(|(k, v)| (k.into(), v.into())).collect())
+        .unwrap_or_default();
+    (if vars.iter().any(|(k, _)| k == "PATH") { vars } else { std::env::vars().collect() }, claude)
 }
 
 // ---- worktree + hook settings ----
 
-fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
+pub fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
     let o = Command::new("git").arg("-C").arg(repo).args(args).output().map_err(|e| e.to_string())?;
     if o.status.success() {
         Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
@@ -227,7 +237,7 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
         }
         (s.worktree.clone(), s.permission_mode)
     };
-    let (path, claude) = shell_env();
+    let (vars, claude) = shell_env();
     let claude = claude.clone().or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.local/bin/claude")).filter(|p| Path::new(p).exists())).ok_or("claude not found on PATH (login shell)")?;
     let hk = app.state::<Hooks>();
     let pair = native_pty_system().openpty(PtySize { rows: 40, cols: 120, pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string())?;
@@ -239,8 +249,12 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
             c.env_remove(k);
         }
     }
+    for (k, v) in vars {
+        if !(k.starts_with("CLAUDE") || k == "AI_AGENT") {
+            c.env(k, v);
+        }
+    }
     c.cwd(&wt);
-    c.env("PATH", path);
     c.env("TERM", "xterm-256color");
     c.env("MURIM_PORT", hk.port.to_string());
     c.env("MURIM_TOKEN", &hk.token);
@@ -437,9 +451,13 @@ mod tests {
 
     #[test]
     fn shell_env_parse_ignores_noise() {
-        let out = "motd\nMURIM_PATH=/a:/b\nMURIM_CLAUDE=/x/claude\n";
-        assert_eq!(parse_shell_env(out, "/z"), ("/a:/b".into(), Some("/x/claude".into())));
-        assert_eq!(parse_shell_env("MURIM_CLAUDE=\n", "/z"), ("/z".into(), None));
+        let out = "motd\nMURIM_CLAUDE=/x/claude\n__MURIM_ENV__\nPATH=/a:/b\0GITHUB_TOKEN=t=1\0";
+        let (vars, claude) = parse_shell_env(out);
+        assert_eq!(claude.as_deref(), Some("/x/claude"));
+        assert!(vars.contains(&("PATH".into(), "/a:/b".into())));
+        assert!(vars.contains(&("GITHUB_TOKEN".into(), "t=1".into())));
+        let (vars, claude) = parse_shell_env("MURIM_CLAUDE=\n"); // no marker → own env
+        assert!(claude.is_none() && vars.iter().any(|(k, _)| k == "PATH"));
     }
 
     #[test]

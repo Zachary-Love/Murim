@@ -204,6 +204,22 @@ Contract between backend and UI (serde `camelCase`):
 2. **UI** — Start button w/ permission-mode picker, status badges, task pane with xterm.js attached
    (snapshot replay + live), input/resize, open Linear URL via `tauri-plugin-opener`.
 
+### Phase 4 tasks
+
+Only tasks with a session are tracked. Token from `gh auth token` (login-shell PATH); owner/name from the
+repo's `origin` URL; PR found by `headRefName == branch` (newest). Poll every 60s + on `Stop` hook + manual refresh.
+
+Contract (serde `camelCase`):
+- `PrHealth { number, url, title, state: open|merged|closed, isDraft, ci: passing|failing|pending|none,
+  failingChecks: [name], unresolvedThreads, changesRequested, conflict, reviewDecision: Option,
+  overall: merged|closed|conflict|ciFailing|changesRequested|unresolvedComments|draft|ciPending|awaitingReview|readyToMerge }`
+  (`overall` = first matching in that order — pure fn, unit-tested on fixtures).
+- Commands: `get_prs() -> {issueId: PrHealth}`, `refresh_prs()`. Event: `prs-updated` (full map).
+- On `merged`: kill PTY, `git worktree remove` (no `--force`; dirty → leave it and surface an error), delete local branch.
+
+1. **Backend** — `github.rs` (token, GraphQL, `derive_overall`, poller, merge cleanup).
+2. **UI** — PR badge per row (overall, color-coded, links to PR), task pane PR section (checks failing, unresolved count, review state); inbox sort: needsInput > PR problems > awaitingReview > working > rest.
+
 Each phase ends with one runnable check (Rust unit test for the rules/state derivation; manual run for UI).
 
 ## Open questions

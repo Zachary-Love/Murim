@@ -2,7 +2,7 @@ import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Terminal from "./Terminal";
-import { Item, Session, LABEL } from "./Inbox";
+import { Item, Session, PrHealth, LABEL, OVERALL, SEV, prBadge } from "./Inbox";
 
 // ponytail: questions shape is backend-defined JSON; accept {questions:[{question}]}, [{question}], or strings.
 const texts = (q: unknown): string[] => {
@@ -10,7 +10,7 @@ const texts = (q: unknown): string[] => {
   return (Array.isArray(a) ? a : []).map((x) => (typeof x === "string" ? x : (x as { question?: string })?.question ?? JSON.stringify(x)));
 };
 
-export default function TaskPane({ item, session, onBack }: { item: Item; session?: Session; onBack: () => void }) {
+export default function TaskPane({ item, session, onBack, pr }: { item: Item; session?: Session; pr?: PrHealth; onBack: () => void }) {
   const [prompt, setPrompt] = useState("");
   const [err, setErr] = useState("");
   const id = item.issue.id;
@@ -33,6 +33,17 @@ export default function TaskPane({ item, session, onBack }: { item: Item; sessio
       </div>
       {err && <div className="banner">{err}</div>}
       {qs.map((q, n) => <div key={n} className="question">{q}</div>)}
+      {pr && (
+        <div className={`prbox ${SEV[pr.overall] ?? "grey"}`}>
+          <div>{prBadge(pr)} <a onClick={() => openUrl(pr.url)}>{pr.title}</a> <button onClick={() => invoke("refresh_prs").catch((e) => setErr(String(e)))}>↻ PR</button></div>
+          <div className="meta">
+            CI: {pr.ci}{pr.failingChecks.length > 0 && ` (${pr.failingChecks.join(", ")})`}
+            {" · "}{pr.unresolvedThreads} unresolved thread{pr.unresolvedThreads === 1 ? "" : "s"}
+            {" · "}review: {pr.reviewDecision ?? (pr.changesRequested ? "CHANGES_REQUESTED" : "none")}
+            {pr.conflict && <b className="conflict"> · merge conflict</b>}
+          </div>
+        </div>
+      )}
       <Terminal issueId={id} />
     </div>
   );

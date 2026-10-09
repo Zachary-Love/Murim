@@ -12,21 +12,41 @@ export type Status = "starting" | "working" | "needsInput" | "idle" | "ended";
 export type Session = { issueId: string; worktree: string; sessionId: string | null; status: Status; questions: unknown; ptyAlive: boolean; permissionMode: Mode };
 export const LABEL: Record<Status, string> = { starting: "Starting", working: "Working", needsInput: "Needs input", idle: "Idle", ended: "Ended" };
 export type Repo = { name: string; path: string };
+export type PrHealth = {
+  number: number; url: string; title: string; state: string; isDraft: boolean; ci: string; failingChecks: string[];
+  unresolvedThreads: number; changesRequested: boolean; conflict: boolean; reviewDecision?: string | null; overall: string;
+};
+export type PrMap = Record<string, PrHealth>;
+export const SEV: Record<string, string> = {
+  ciFailing: "red", changesRequested: "red", conflict: "red",
+  unresolvedComments: "amber", ciPending: "amber", draft: "amber",
+  awaitingReview: "blue", readyToMerge: "green", merged: "grey", closed: "grey",
+};
+export const OVERALL: Record<string, string> = {
+  ciFailing: "CI failing", changesRequested: "Changes requested", conflict: "Conflict", unresolvedComments: "Comments",
+  ciPending: "CI pending", draft: "Draft", awaitingReview: "Awaiting review", readyToMerge: "Ready to merge", merged: "Merged", closed: "Closed",
+};
+export const prBadge = (p: PrHealth) => (
+  <a className={`badge pr ${SEV[p.overall] ?? "grey"}`} title={p.title} onClick={() => openUrl(p.url)}>#{p.number} {OVERALL[p.overall] ?? p.overall}</a>
+);
 
 const rank = (i: Item) => (i.issue.stateType === "started" ? 0 : 1) * 10 + (i.issue.priority || 9);
 const live = (s?: Session) => s?.status === "starting" || s?.status === "working";
 const sess = (m: Record<string, Session>, i: Item) => m[i.issue.id];
-export const sortItems = (a: Item[], m: Record<string, Session>) =>
+export const sortItems = (a: Item[], m: Record<string, Session>, prs: PrMap = {}) =>
   [...a].sort((x, y) => {
-    const g = (i: Item) => (sess(m, i)?.status === "needsInput" ? 0 : live(sess(m, i)) ? 1 : 2);
+    const g = (i: Item) => {
+      const sv = SEV[prs[i.issue.id]?.overall];
+      return sess(m, i)?.status === "needsInput" ? 0 : sv === "red" ? 1 : sv === "amber" ? 2 : sv === "blue" ? 3 : live(sess(m, i)) ? 4 : 5;
+    };
     return g(x) - g(y) || rank(x) - rank(y);
   });
 export const repoName = (i: Item) => i.repo?.path.split("/").filter(Boolean).pop() ?? "";
 const PRIORITY = ["", "Urgent", "High", "Medium", "Low"];
 
-type Props = { items: Item[]; repos: Repo[]; sessions: Record<string, Session>; defaultMode: Mode; onOpen: (id: string) => void };
+type Props = { items: Item[]; repos: Repo[]; sessions: Record<string, Session>; prs: PrMap; defaultMode: Mode; onOpen: (id: string) => void };
 
-export default function Inbox({ items, repos, sessions, defaultMode, onOpen }: Props) {
+export default function Inbox({ items, repos, sessions, prs, defaultMode, onOpen }: Props) {
   const [modes, setModes] = useState<Record<string, Mode>>({});
   const [errs, setErrs] = useState<Record<string, string>>({});
   const start = (id: string, mode: Mode) =>
@@ -36,7 +56,7 @@ export default function Inbox({ items, repos, sessions, defaultMode, onOpen }: P
   if (!items.length) return <p className="empty">No tasks</p>;
   return (
     <ul className="tasks">
-      {sortItems(items, sessions).map((i) => {
+      {sortItems(items, sessions, prs).map((i) => {
         const se = sess(sessions, i);
         const mode = modes[i.issue.id] ?? defaultMode;
         return (
@@ -51,6 +71,7 @@ export default function Inbox({ items, repos, sessions, defaultMode, onOpen }: P
             {errs[i.issue.id] && <div className="err">{errs[i.issue.id]}</div>}
           </div>
           <span className={`badge ${se?.status ?? ""}`}>{se ? LABEL[se.status] : "Todo"}</span>
+          {prs[i.issue.id] && prBadge(prs[i.issue.id])}
           {i.resolving ? <span className="badge">matching…</span> : i.repo && <span className="badge">{i.repo.source}</span>}
           <select value={i.repo?.path ?? ""} onChange={(e) => invoke("set_issue_repo", { issueId: i.issue.id, path: e.target.value })}>
             {!i.repo && <option value="" disabled>Pick repo…</option>}

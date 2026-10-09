@@ -48,3 +48,11 @@ a.ident:hover { color: #d4d6da; text-decoration: underline; }
 .pane-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .question { background: #2a2410; color: #f0d68a; padding: 8px 12px; border-radius: 4px; }
 .term { flex: 1; min-height: 0; }
+.badge.pr { cursor: pointer; }
+.badge.red, .prbox.red { color: #e57373; border-color: #e57373; }
+.badge.amber, .prbox.amber { color: #f0b429; border-color: #f0b429; }
+.badge.blue, .prbox.blue { color: #5aa9e6; border-color: #5aa9e6; }
+.badge.green, .prbox.green { color: #6cc070; border-color: #6cc070; }
+.prbox { border: 1px solid #25272c; border-radius: 4px; padding: 6px 10px; color: #d4d6da; }
+.prbox .conflict { color: #e57373; }
+.dot { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: #e57373; }
