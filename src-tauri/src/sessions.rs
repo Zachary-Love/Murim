@@ -277,7 +277,9 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
                 trusted = true;
                 let (a, i) = (app.clone(), id.clone());
                 std::thread::spawn(move || {
-                    // "No, exit" is the default: Down, then Enter selects "Yes".
+                    // "No, exit" is the default: Down, then Enter selects "Yes". Real-claude smoke test: a Down sent
+                    // within ms of the dialog drawing is handled twice (wraps back to "No"), so let the TUI settle first.
+                    std::thread::sleep(Duration::from_millis(1000));
                     let _ = write_pty(&a, &i, b"\x1b[B");
                     std::thread::sleep(Duration::from_millis(500));
                     let _ = write_pty(&a, &i, b"\r");
