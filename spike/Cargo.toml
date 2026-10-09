@@ -1,0 +1,9 @@
+[package]
+name = "spike"
+version = "0.0.0"
+edition = "2021"
+[dependencies]
+portable-pty = "0.8"
+tiny_http = "0.12"
+serde_json = "1"
+rand = "0.8"
