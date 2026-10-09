@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Settings from "./Settings";
 import Caffeine from "./Caffeine";
-import Inbox, { Item, Repo, Session, Mode, PrMap, SEV, repoName } from "./Inbox";
+import Inbox, { Item, Repo, Session, Mode, LogEntry, PrMap, SEV, repoName } from "./Inbox";
 import TaskPane from "./TaskPane";
 
 type Payload = { items: Item[]; error: string | null };
@@ -19,6 +19,7 @@ export default function App() {
   const [mode, setMode] = useState<Mode>("normal");
   const [prs, setPrs] = useState<PrMap>({});
   const [prErr, setPrErr] = useState<string | null>(null);
+  const [logs, setLogs] = useState<Record<string, LogEntry[]>>({});
   const [open, setOpen] = useState<string | null>(null);
   useEffect(() => {
     invoke<Record<string, Session>>("get_sessions").then(setSessions).catch(() => {});
@@ -30,7 +31,9 @@ export default function App() {
     const setPp = (v: PrPayload) => { setPrs(v.prs ?? {}); setPrErr(v.error ?? null); };
     invoke<PrPayload>("get_prs").then(setPp).catch(() => {}); // ponytail: tolerate backend without get_prs
     const up = listen<PrPayload>("prs-updated", (e) => setPp(e.payload));
-    return () => { un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); };
+    const ul = listen<LogEntry>("tempering-log", (e) =>
+      setLogs((l) => ({ ...l, [e.payload.issueId]: [e.payload, ...(l[e.payload.issueId] ?? [])].slice(0, 20) })));
+    return () => { ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); };
   }, []);
 
   const counts = new Map<string, number>();
@@ -59,7 +62,7 @@ export default function App() {
       </aside>
       <main className="main">
         {showSettings ? <Settings /> : openItem ? (
-          <TaskPane key={openItem.issue.id} item={openItem} session={sessions[openItem.issue.id]} pr={prs[openItem.issue.id]} onBack={() => setOpen(null)} />
+          <TaskPane key={openItem.issue.id} item={openItem} session={sessions[openItem.issue.id]} pr={prs[openItem.issue.id]} log={logs[openItem.issue.id] ?? []} onBack={() => setOpen(null)} />
         ) : (
           <>
             {prErr && <div className="banner">{prErr}</div>}

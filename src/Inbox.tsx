@@ -9,7 +9,10 @@ export type Item = {
 };
 export type Mode = "normal" | "allowlist" | "skip";
 export type Status = "starting" | "working" | "needsInput" | "idle" | "ended";
-export type Session = { issueId: string; worktree: string; sessionId: string | null; status: Status; questions: unknown; ptyAlive: boolean; permissionMode: Mode };
+export type Session = { issueId: string; worktree: string; sessionId: string | null; status: Status; questions: unknown; ptyAlive: boolean; permissionMode: Mode; tempering?: boolean; replyMode?: ReplyMode; escalations?: Escalation[] };
+export type ReplyMode = "off" | "terse" | "full";
+export type Escalation = { id: string; threadId: string; path: string; comment: string; reason: string };
+export type LogEntry = { issueId: string; at: number | string; message: string };
 export const LABEL: Record<Status, string> = { starting: "Starting", working: "Working", needsInput: "Needs input", idle: "Idle", ended: "Ended" };
 export type Repo = { name: string; path: string };
 export type PrHealth = {
@@ -37,7 +40,7 @@ export const sortItems = (a: Item[], m: Record<string, Session>, prs: PrMap = {}
   [...a].sort((x, y) => {
     const g = (i: Item) => {
       const sv = SEV[prs[i.issue.id]?.overall];
-      return sess(m, i)?.status === "needsInput" ? 0 : sv === "red" ? 1 : sv === "amber" ? 2 : sv === "blue" ? 3 : live(sess(m, i)) ? 4 : 5;
+      return sess(m, i)?.status === "needsInput" || sess(m, i)?.escalations?.length ? 0 : sv === "red" ? 1 : sv === "amber" ? 2 : sv === "blue" ? 3 : live(sess(m, i)) ? 4 : 5;
     };
     return g(x) - g(y) || rank(x) - rank(y);
   });
@@ -72,6 +75,12 @@ export default function Inbox({ items, repos, sessions, prs, defaultMode, onOpen
           </div>
           <span className={`badge ${se?.status ?? ""}`}>{se ? LABEL[se.status] : "Todo"}</span>
           {prs[i.issue.id] && prBadge(prs[i.issue.id])}
+          {!!se?.escalations?.length && <span className="badge red" title="Escalations">{se.escalations.length}</span>}
+          {prs[i.issue.id] && (
+            <button className={se?.tempering ? "on" : ""} title="Tempering" onClick={() =>
+              invoke("set_tempering", { issueId: i.issue.id, on: !se?.tempering })
+                .catch((e) => setErrs((x) => ({ ...x, [i.issue.id]: String(e) })))}>🔥 Temper</button>
+          )}
           {i.resolving ? <span className="badge">matching…</span> : i.repo && <span className="badge">{i.repo.source}</span>}
           <select value={i.repo?.path ?? ""} onChange={(e) => invoke("set_issue_repo", { issueId: i.issue.id, path: e.target.value })}>
             {!i.repo && <option value="" disabled>Pick repo…</option>}

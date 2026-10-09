@@ -1,5 +1,6 @@
 use crate::hooks::{self, Hooks, Status};
 use crate::settings::{self, PermissionMode};
+use crate::tempering::{Escalation, Memory, ReplyMode};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -25,6 +26,14 @@ pub struct SessionInfo {
     pub questions: Option<Value>,
     pub pty_alive: bool,
     pub permission_mode: PermissionMode,
+    #[serde(default)]
+    pub tempering: bool,
+    #[serde(default)]
+    pub reply_mode: ReplyMode,
+    #[serde(default)]
+    pub escalations: Vec<Escalation>,
+    #[serde(default)]
+    pub memory: Memory,
 }
 
 struct Pty {
@@ -61,6 +70,11 @@ fn update<R>(app: &AppHandle, f: impl FnOnce(&mut Inner) -> R) -> R {
     r
 }
 
+/// Mutate one session (persist + emit); None if unknown.
+pub fn with_session<R>(app: &AppHandle, id: &str, f: impl FnOnce(&mut SessionInfo) -> R) -> Option<R> {
+    update(app, |g| g.map.get_mut(id).map(f))
+}
+
 /// On startup every persisted session is ended/resumable (no PTY survives a restart).
 pub fn load(app: &AppHandle) {
     let Ok(d) = settings::dir(app) else { return };
@@ -79,11 +93,11 @@ pub fn kill_all(app: &AppHandle) {
 
 // ---- hooks -> status ----
 
-fn title_of(s: &SessionInfo) -> String {
+pub fn title_of(s: &SessionInfo) -> String {
     Path::new(&s.worktree).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| s.issue_id.clone())
 }
 
-fn notify(app: &AppHandle, title: String, body: String) {
+pub fn notify(app: &AppHandle, title: String, body: String) {
     let _ = app.notification().builder().title(title).body(body).show();
 }
 
@@ -110,6 +124,8 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
         notify(app, t, b);
     }
     if ev["hook_event_name"] == "Stop" {
+        let (a, t) = (app.clone(), task.to_string());
+        std::thread::spawn(move || crate::tempering::consume(&a, &t));
         crate::github::poke(app);
     }
 }
@@ -201,15 +217,23 @@ fn write_hooks(wt: &Path) -> Result<(), String> {
     std::fs::write(f, serde_json::to_string_pretty(&merge_hooks(cur)).unwrap()).map_err(|e| e.to_string())
 }
 
-fn exclude_settings(repo: &Path) -> Result<(), String> {
+pub fn exclude_settings(repo: &Path) -> Result<(), String> {
     let f = repo.join(git(repo, &["rev-parse", "--git-common-dir"])?).join("info/exclude"); // join of an absolute path replaces
-    let cur = std::fs::read_to_string(&f).unwrap_or_default();
-    if cur.lines().any(|l| l.trim() == ".claude/settings.local.json") {
+    let mut cur = std::fs::read_to_string(&f).unwrap_or_default();
+    let before = cur.len();
+    for pat in [".claude/settings.local.json", ".murim/"] {
+        if !cur.lines().any(|l| l.trim() == pat) {
+            if !cur.is_empty() && !cur.ends_with('\n') {
+                cur.push('\n');
+            }
+            cur += &format!("{pat}\n");
+        }
+    }
+    if cur.len() == before {
         return Ok(());
     }
     std::fs::create_dir_all(f.parent().unwrap()).map_err(|e| e.to_string())?;
-    let nl = if cur.is_empty() || cur.ends_with('\n') { "" } else { "\n" };
-    std::fs::write(&f, format!("{cur}{nl}.claude/settings.local.json\n")).map_err(|e| e.to_string())
+    std::fs::write(&f, cur).map_err(|e| e.to_string())
 }
 
 // ---- PTY ----
@@ -352,7 +376,8 @@ pub fn start_task(app: AppHandle, issue_id: String, permission_mode: PermissionM
         if g.ptys.contains_key(&issue_id) {
             return Err("already running".to_string());
         }
-        g.map.insert(issue_id.clone(), SessionInfo { issue_id: issue_id.clone(), worktree: wt.to_string_lossy().into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode });
+        let old = g.map.get(&issue_id).cloned();
+        g.map.insert(issue_id.clone(), SessionInfo { issue_id: issue_id.clone(), worktree: wt.to_string_lossy().into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode, tempering: old.as_ref().is_some_and(|o| o.tempering), reply_mode: old.as_ref().map(|o| o.reply_mode).unwrap_or_default(), escalations: vec![], memory: old.map(|o| o.memory).unwrap_or_default() });
         Ok(())
     })?;
     spawn(&app, &issue_id, vec![prompt])
@@ -367,7 +392,7 @@ pub fn resume_task(app: AppHandle, issue_id: String, prompt: Option<String>) -> 
     };
     if alive {
         if let Some(p) = prompt {
-            write_pty(&app, &issue_id, p.as_bytes())?;
+            write_pty(&app, &issue_id, format!("\x1b[200~{p}\x1b[201~").as_bytes())?; // bracketed paste: newlines must not submit
             std::thread::sleep(Duration::from_millis(500));
             write_pty(&app, &issue_id, b"\r")?;
         }
@@ -479,7 +504,8 @@ mod tests {
         write_hooks(&wt).unwrap();
         exclude_settings(&repo).unwrap();
         exclude_settings(&repo).unwrap();
-        assert!(std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap().matches(".claude/settings.local.json").count() == 1);
+        let ex = std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap();
+        assert!(ex.matches(".claude/settings.local.json").count() == 1 && ex.matches(".murim/").count() == 1);
         assert!(git(&wt, &["status", "--porcelain"]).unwrap().is_empty()); // ignored
         let _ = std::fs::remove_dir_all(&root);
     }

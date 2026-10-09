@@ -1,4 +1,4 @@
-use crate::sessions;
+use crate::{sessions, tempering};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -168,7 +168,7 @@ pub fn parse_remote(url: &str) -> Option<(String, String)> {
 
 // ---- io ----
 
-fn token() -> Result<String, String> {
+pub fn token() -> Result<String, String> {
     let out = Command::new("gh").arg("auth").arg("token").envs(sessions::shell_env().0.iter().map(|(k, v)| (k, v))).stdin(std::process::Stdio::null()).output().map_err(|_| "GitHub CLI (gh) not found — install it and run `gh auth login`".to_string())?;
     let t = String::from_utf8_lossy(&out.stdout).trim().to_string();
     if out.status.success() && !t.is_empty() {
@@ -178,14 +178,14 @@ fn token() -> Result<String, String> {
     }
 }
 
-const QUERY: &str = "query($o:String!,$n:String!,$b:String!){repository(owner:$o,name:$n){pullRequests(headRefName:$b,first:1,orderBy:{field:CREATED_AT,direction:DESC},states:[OPEN,MERGED,CLOSED]){nodes{number url title state isDraft mergeable reviewDecision reviewThreads(first:100){nodes{isResolved isOutdated}} latestReviews(first:20){nodes{state}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name conclusion status} ... on StatusContext{context state}}}}}}}}}}}";
+const QUERY: &str = "query($o:String!,$n:String!,$b:String!){viewer{login} repository(owner:$o,name:$n){pullRequests(headRefName:$b,first:1,orderBy:{field:CREATED_AT,direction:DESC},states:[OPEN,MERGED,CLOSED]){nodes{number url title state isDraft mergeable reviewDecision headRefOid baseRefName reviewThreads(first:100){nodes{id path line isResolved isOutdated comments(last:10){nodes{databaseId author{login} body}}}} latestReviews(first:20){nodes{state}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name conclusion status databaseId checkSuite{workflowRun{databaseId}}} ... on StatusContext{context state}}}}}}}}}}}";
 
-fn query(tok: &str, owner: &str, name: &str, branch: &str) -> Result<Value, String> {
+pub fn gql(tok: &str, query: &str, vars: Value) -> Result<Value, String> {
     let j: Value = ureq::post("https://api.github.com/graphql")
         .set("Authorization", &format!("bearer {tok}"))
         .set("User-Agent", "murim")
         .timeout(Duration::from_secs(20))
-        .send_json(json!({"query": QUERY, "variables": {"o": owner, "n": name, "b": branch}}))
+        .send_json(json!({"query": query, "variables": vars}))
         .map_err(|e| format!("GitHub: {e}"))?
         .into_json()
         .map_err(|e| e.to_string())?;
@@ -193,6 +193,10 @@ fn query(tok: &str, owner: &str, name: &str, branch: &str) -> Result<Value, Stri
         Some(m) => Err(format!("GitHub: {m}")),
         None => Ok(j),
     }
+}
+
+fn query(tok: &str, owner: &str, name: &str, branch: &str) -> Result<Value, String> {
+    gql(tok, QUERY, json!({"o": owner, "n": name, "b": branch}))
 }
 
 /// (repo path, owner, name, branch) for a session worktree.
@@ -225,7 +229,7 @@ fn poll(app: &AppHandle) {
         Err(e) => return publish(&|g| g.payload = Payload { prs: HashMap::new(), error: Some(e.clone()) }),
     };
     let old = gh.inner.lock().unwrap().payload.prs.clone();
-    let (mut prs, mut error) = (HashMap::new(), None);
+    let (mut prs, mut error, mut details) = (HashMap::new(), None, vec![]);
     for (id, s) in &sess {
         let wt = Path::new(&s.worktree);
         if !wt.exists() {
@@ -253,9 +257,15 @@ fn poll(app: &AppHandle) {
                 Err(e) => g.errs.insert(id.clone(), format!("{label}: cleanup failed: {e}")),
             };
         }
+        if let Some(d) = tempering::parse_detail(&j, &p) {
+            details.push((id.clone(), d, p.clone()));
+        }
         prs.insert(id.clone(), p);
     }
     publish(&|g| g.payload = Payload { prs: prs.clone(), error: error.clone() });
+    for (id, d, p) in &details {
+        tempering::run(app, id, d, p);
+    }
 }
 
 pub fn start(app: AppHandle) {
@@ -339,6 +349,18 @@ mod tests {
             assert_eq!(parse_remote(u), Some(("acme".into(), "app".into())), "{u}");
         }
         assert_eq!(parse_remote(""), None);
+    }
+
+    /// `MURIM_LIVE=owner/name/branch cargo test live_query -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn live_query() {
+        let v = std::env::var("MURIM_LIVE").unwrap();
+        let p: Vec<_> = v.splitn(3, '/').collect();
+        let j = query(&token().unwrap(), p[0], p[1], p[2]).unwrap();
+        let h = parse_pr(&j).unwrap();
+        let d = tempering::parse_detail(&j, &h).unwrap();
+        println!("{h:?}\n{d:?}");
     }
 
     #[test]

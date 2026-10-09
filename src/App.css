@@ -56,3 +56,9 @@ a.ident:hover { color: #d4d6da; text-decoration: underline; }
 .prbox { border: 1px solid #25272c; border-radius: 4px; padding: 6px 10px; color: #d4d6da; }
 .prbox .conflict { color: #e57373; }
 .dot { display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: #e57373; }
+button.on { color: #f0b429; border-color: #f0b429; }
+.temper .esc { margin-top: 6px; padding-top: 6px; border-top: 1px solid #25272c; display: flex; flex-wrap: wrap; gap: 6px; }
+.temper .esc > div, .temper blockquote { flex-basis: 100%; margin: 0; }
+.temper blockquote { border-left: 2px solid #25272c; padding-left: 8px; color: #8a8f98; }
+.temper textarea { width: 100%; min-height: 60px; }
+.tlog { margin: 6px 0 0; padding: 0; list-style: none; max-height: 100px; overflow-y: auto; font-size: 12px; }

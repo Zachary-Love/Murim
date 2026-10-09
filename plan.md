@@ -220,6 +220,35 @@ Contract (serde `camelCase`):
 1. **Backend** — `github.rs` (token, GraphQL, `derive_overall`, poller, merge cleanup).
 2. **UI** — PR badge per row (overall, color-coded, links to PR), task pane PR section (checks failing, unresolved count, review state); inbox sort: needsInput > PR problems > awaitingReview > working > rest.
 
+### Phase 5 tasks
+
+Per-task settings persisted with the session: `tempering: bool` (default off), `replyMode: off|terse|full` (default terse).
+Tempering acts only when the session is `idle`/`ended` (never while working/needsInput) — that's the one-in-flight guard.
+Triggers come from a richer PR fetch: head SHA, failing check runs (name, databaseId, workflow run id), unresolved
+non-outdated threads (id, path, line, comment bodies + authors, last comment id), mergeable.
+
+Rules (pure `fn decide(pr, memory) -> Vec<Action>`, unit-tested):
+- CI failing on (sha, check) never seen → `Rerun(run id)` once (`gh run rerun <id> --failed`); seen-and-rerun and still failing →
+  `Invoke(prompt with check names + last ~80 lines of `gh run view <id> --log-failed`)`.
+- New unresolved thread ids / new last-comment ids → `Invoke(prompt listing threads + reply protocol)`.
+- Conflict on new sha → `Invoke("rebase onto <base>, resolve conflicts, push")`.
+- readyToMerge newly reached → `NotifyReady`.
+- Per (PR, trigger kind) more than 3 invokes → `Escalate` (status needsInput + notification), stop acting on that kind.
+Memory (handled keys + attempt counts) persisted in sessions.json. Delivery = existing `resume_task(issueId, prompt)`.
+
+Review replies: prompt tells Claude to append to `<wt>/.murim/replies.jsonl` (`{threadId, action: reply|disagree, body|reason, resolve}`);
+`.murim/` added to `.git/info/exclude`. On `Stop`, Murim consumes the file: off → drop; terse → body ≤5 words else "Fixed";
+full → post as is. Posting via GraphQL `addPullRequestReviewThreadReply` + `resolveReviewThread`. `disagree` → stored escalation.
+
+Contract additions (serde camelCase):
+- `SessionInfo` gains `tempering`, `replyMode`, `escalations: [{ id, threadId, path, comment, reason }]`.
+- Commands: `set_tempering(issueId, on)`, `set_reply_mode(issueId, mode)`,
+  `resolve_escalation(issueId, escalationId, choice: doIt|postPushback|ownReply|ignore, text: Option)`.
+- Event: `tempering-log { issueId, at, message }` (what Tempering did, for the UI feed).
+
+1. **Backend** — `tempering.rs` (decide + memory + actions + replies consumer/poster) + github.rs richer fetch.
+2. **UI** — Tempering toggle + reply-mode select (row + pane), escalation cards with the 4 buttons (+ text box for own reply), activity feed from `tempering-log`.
+
 Each phase ends with one runnable check (Rust unit test for the rules/state derivation; manual run for UI).
 
 ## Open questions
