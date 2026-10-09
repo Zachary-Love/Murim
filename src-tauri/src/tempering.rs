@@ -250,12 +250,12 @@ fn details() -> &'static Mutex<HashMap<String, PrDetail>> {
     D.get_or_init(Default::default)
 }
 
-fn log(app: &AppHandle, id: &str, message: impl Into<String>) {
+pub fn log(app: &AppHandle, id: &str, message: impl Into<String>) {
     let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
     let _ = app.emit("tempering-log", json!({"issueId": id, "at": at, "message": message.into()}));
 }
 
-fn gh(wt: &str, args: &[&str]) -> Result<String, String> {
+pub fn gh(wt: &str, args: &[&str]) -> Result<String, String> {
     let o = Command::new("gh").args(args).current_dir(wt).envs(sessions::shell_env().0.iter().map(|(k, v)| (k, v))).stdin(std::process::Stdio::null()).output().map_err(|e| format!("gh: {e}"))?;
     let (out, err) = (String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     if o.status.success() { Ok(out.into_owned()) } else { Err(format!("gh {}: {}", args.join(" "), err.trim())) }
@@ -352,7 +352,9 @@ pub fn run(app: &AppHandle, id: &str, d: &PrDetail, h: &PrHealth) {
             prompts.push(format!("Failed log tail for {name} (last {LOG_LINES} lines):\n{t}"));
         }
         let _ = std::fs::create_dir_all(Path::new(&wt).join(".murim"));
+        sessions::with_session(app, id, |s| s.tempering_turn = true);
         if let Err(e) = sessions::resume_task(app.clone(), id.into(), Some(prompts.join("\n\n"))) {
+            sessions::with_session(app, id, |s| s.tempering_turn = false);
             for (kind, keys) in invokes {
                 for k in keys {
                     mem.handled.remove(&k);
@@ -401,7 +403,10 @@ pub async fn resolve_escalation(app: AppHandle, issue_id: String, escalation_id:
     match choice {
         Choice::DoIt => {
             let p = format!("Make the change requested in thread {}: {} even though you disagreed\n\n(threadId {})\n{}", e.path, e.comment, e.thread_id, reply_protocol());
-            sessions::resume_task(app.clone(), issue_id.clone(), Some(p))?;
+            sessions::with_session(&app, &issue_id, |s| s.tempering_turn = true);
+            sessions::resume_task(app.clone(), issue_id.clone(), Some(p)).inspect_err(|_| {
+                sessions::with_session(&app, &issue_id, |s| s.tempering_turn = false);
+            })?;
         }
         Choice::PostPushback => post(&app, &issue_id, &e.thread_id, &e.reason, false)?, // explicit user choice: ignores replyMode
         Choice::OwnReply => post(&app, &issue_id, &e.thread_id, text.as_deref().filter(|t| !t.trim().is_empty()).ok_or("empty reply")?, false)?,

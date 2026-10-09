@@ -49,6 +49,7 @@ a.ident:hover { color: #d4d6da; text-decoration: underline; }
 .question { background: #2a2410; color: #f0d68a; padding: 8px 12px; border-radius: 4px; }
 .term { flex: 1; min-height: 0; }
 .badge.pr { cursor: pointer; }
+.step { font-size: 11px; color: #b39ddb; }
 .badge.red, .prbox.red { color: #e57373; border-color: #e57373; }
 .badge.amber, .prbox.amber { color: #f0b429; border-color: #f0b429; }
 .badge.blue, .prbox.blue { color: #5aa9e6; border-color: #5aa9e6; }

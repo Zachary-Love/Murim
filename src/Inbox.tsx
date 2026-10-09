@@ -9,11 +9,13 @@ export type Item = {
 };
 export type Mode = "normal" | "allowlist" | "skip";
 export type Status = "starting" | "working" | "needsInput" | "idle" | "ended";
-export type Session = { issueId: string; worktree: string; sessionId: string | null; status: Status; questions: unknown; ptyAlive: boolean; permissionMode: Mode; tempering?: boolean; replyMode?: ReplyMode; escalations?: Escalation[] };
+export type Session = { issueId: string; worktree: string; sessionId: string | null; status: Status; questions: unknown; ptyAlive: boolean; permissionMode: Mode; tempering?: boolean; replyMode?: ReplyMode; escalations?: Escalation[]; prFlow?: string };
 export type ReplyMode = "off" | "terse" | "full";
 export type Escalation = { id: string; threadId: string; path: string; comment: string; reason: string };
 export type LogEntry = { issueId: string; at: number | string; message: string };
 export const LABEL: Record<Status, string> = { starting: "Starting", working: "Working", needsInput: "Needs input", idle: "Idle", ended: "Ended" };
+export const STEP: Record<string, string> = { none: "Implementing", reviewing: "Reviewing", opened: "PR draft", ready: "Ready for review" };
+export const step = (s: Session) => <span className="step">{STEP[s.prFlow ?? "none"] ?? "Implementing"}</span>;
 export type Repo = { name: string; path: string };
 export type PrHealth = {
   number: number; url: string; title: string; state: string; isDraft: boolean; ci: string; failingChecks: string[];
@@ -74,6 +76,7 @@ export default function Inbox({ items, repos, sessions, prs, defaultMode, onOpen
             {errs[i.issue.id] && <div className="err">{errs[i.issue.id]}</div>}
           </div>
           <span className={`badge ${se?.status ?? ""}`}>{se ? LABEL[se.status] : "Todo"}</span>
+          {se && step(se)}
           {prs[i.issue.id] && prBadge(prs[i.issue.id])}
           {!!se?.escalations?.length && <span className="badge red" title="Escalations">{se.escalations.length}</span>}
           {prs[i.issue.id] && (

@@ -249,6 +249,19 @@ Contract additions (serde camelCase):
 1. **Backend** — `tempering.rs` (decide + memory + actions + replies consumer/poster) + github.rs richer fetch.
 2. **UI** — Tempering toggle + reply-mode select (row + pane), escalation cards with the 4 buttons (+ text box for own reply), activity feed from `tempering-log`.
 
+### Phase 6 tasks
+
+- Initial prompt (start_task) ends with: "When the issue is fully implemented, end your final message with the line MURIM_DONE."
+- On `Stop` (hooks payload has `last_assistant_message`), deterministic:
+  - contains `MURIM_DONE` and no quality pass yet → mark `prFlow: reviewing`, resume with: run `/ponytail:ponytail-review`
+    on the branch diff, apply its fixes, run the project's tests, commit, push, then open a **draft** PR with
+    `gh pr create --draft` (own title + description, body includes `Fixes <IDENTIFIER>`), end with `MURIM_PR_OPENED`.
+  - contains `MURIM_PR_OPENED` → `prFlow: opened`, poke the PR poller.
+  - neither marker, no PR yet, not already needsInput → status `needsInput` + notify ("Claude stopped — reply needed?").
+    (Tempering-invoked turns are exempt: they don't need the marker.)
+- PR poller: PR is draft + `ci == passing` + `prFlow == opened` → `gh pr ready <n>` once (`prFlow: ready`), tempering-log it.
+- `SessionInfo` gains `prFlow: none|reviewing|opened|ready` (serde default none). UI: show it as a small step label in row + pane.
+
 Each phase ends with one runnable check (Rust unit test for the rules/state derivation; manual run for UI).
 
 ## Open questions

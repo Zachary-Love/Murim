@@ -13,6 +13,46 @@ pub enum Status {
     Ended,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum PrFlow {
+    #[default]
+    None,
+    Reviewing,
+    Opened,
+    Ready,
+}
+
+#[derive(PartialEq, Debug)]
+pub enum StopOutcome {
+    Idle,
+    NeedsInput,
+    Quality,
+    Opened,
+}
+
+/// Deterministic post-turn rule, from the Stop payload's last message.
+/// Tempering-invoked turns are exempt (no marker needed). DONE only triggers the quality pass once.
+/// Marker counts only as the message's last non-empty line (ignoring markdown `*`/`` ` ``), so prose that
+/// merely mentions it ("not done, so no MURIM_DONE yet") doesn't trigger anything.
+fn ends_with_marker(msg: &str, marker: &str) -> bool {
+    msg.lines().rev().map(|l| l.trim().trim_matches(|c| c == '*' || c == '`').trim()).find(|l| !l.is_empty()) == Some(marker)
+}
+
+pub fn on_stop(flow: PrFlow, last_msg: &str, has_pr: bool, tempering_turn: bool) -> StopOutcome {
+    if tempering_turn || flow == PrFlow::Ready {
+        StopOutcome::Idle
+    } else if ends_with_marker(last_msg, "MURIM_PR_OPENED") {
+        if flow == PrFlow::Opened { StopOutcome::Idle } else { StopOutcome::Opened }
+    } else if ends_with_marker(last_msg, "MURIM_DONE") {
+        if flow == PrFlow::None && !has_pr { StopOutcome::Quality } else { StopOutcome::Idle }
+    } else if has_pr {
+        StopOutcome::Idle
+    } else {
+        StopOutcome::NeedsInput
+    }
+}
+
 pub struct Hooks {
     pub port: u16,
     pub token: String,
@@ -71,6 +111,22 @@ mod tests {
     use Status::*;
 
     #[test]
+    fn stop_rules() {
+        use PrFlow as F;
+        use StopOutcome as O;
+        assert_eq!(on_stop(F::None, "x\nMURIM_DONE", false, false), O::Quality);
+        assert_eq!(on_stop(F::Reviewing, "x\nMURIM_PR_OPENED", true, false), O::Opened);
+        assert_eq!(on_stop(F::None, "all done?", false, false), O::NeedsInput);
+        assert_eq!(on_stop(F::Reviewing, "", false, false), O::NeedsInput);
+        assert_eq!(on_stop(F::None, "pushed fixes", true, false), O::Idle);
+        assert_eq!(on_stop(F::Opened, "pushed fixes", true, false), O::Idle);
+        assert_eq!(on_stop(F::None, "no marker", false, true), O::Idle); // tempering turn
+        assert_eq!(on_stop(F::Reviewing, "MURIM_DONE", false, false), O::Idle); // no re-prompt
+        assert_eq!(on_stop(F::Opened, "MURIM_DONE", true, false), O::Idle);
+        assert_eq!(on_stop(F::Opened, "MURIM_PR_OPENED", true, false), O::Idle);
+    }
+
+    #[test]
     fn transitions() {
         let n = |cur, v| next_status(cur, &v);
         assert_eq!(n(Starting, json!({"hook_event_name":"UserPromptSubmit"})).0, Working);
@@ -85,5 +141,12 @@ mod tests {
         assert_eq!(n(Working, json!({"hook_event_name":"Stop"})).0, Idle);
         assert_eq!(n(Idle, json!({"hook_event_name":"SessionEnd"})).0, Ended);
         assert_eq!(n(Idle, json!({"foo":1})).0, Idle);
+    }
+
+    #[test]
+    fn marker_must_be_last_line() {
+        assert!(ends_with_marker("All done.\n\n**MURIM_DONE**\n", "MURIM_DONE"));
+        assert!(!ends_with_marker("Not finished, so no MURIM_DONE yet. Which API should I use?", "MURIM_DONE"));
+        assert_eq!(on_stop(PrFlow::None, "I'll print MURIM_DONE when finished. Question?", false, false), StopOutcome::NeedsInput);
     }
 }

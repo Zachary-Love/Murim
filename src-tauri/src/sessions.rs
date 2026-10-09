@@ -1,4 +1,4 @@
-use crate::hooks::{self, Hooks, Status};
+use crate::hooks::{self, Hooks, PrFlow, Status, StopOutcome};
 use crate::settings::{self, PermissionMode};
 use crate::tempering::{Escalation, Memory, ReplyMode};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
@@ -34,6 +34,11 @@ pub struct SessionInfo {
     pub escalations: Vec<Escalation>,
     #[serde(default)]
     pub memory: Memory,
+    #[serde(default)]
+    pub pr_flow: PrFlow,
+    /// set when tempering resumes the session; cleared on the next Stop
+    #[serde(skip)]
+    pub tempering_turn: bool,
 }
 
 struct Pty {
@@ -101,14 +106,32 @@ pub fn notify(app: &AppHandle, title: String, body: String) {
     let _ = app.notification().builder().title(title).body(body).show();
 }
 
+const DONE_SUFFIX: &str = "\n\nWhen the issue is fully implemented, end your final message with the line MURIM_DONE.";
+
+fn quality_prompt(ident: &str, base: &str) -> String {
+    format!("Quality pass. Run /ponytail:ponytail-review on this branch's diff vs {base} (if that skill is not available, say so and do an equivalent self-review for bugs, needless complexity and dead code), and apply its fixes. Run the project's tests and linters and fix failures. Commit (no AI attribution or Co-Authored-By lines), push the branch, then open a draft PR with `gh pr create --draft` with a clear title and description; the body must include `Fixes {ident}`. End your final message with the line MURIM_PR_OPENED.")
+}
+
 pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
+    let stop = ev["hook_event_name"] == "Stop";
+    let has_pr = stop && crate::github::get_prs(app.state()).prs.contains_key(task);
+    let mut quality = None;
     let note = update(app, |g| {
         let s = g.map.get_mut(task)?;
         if let Some(id) = ev["session_id"].as_str() {
             s.session_id = Some(id.to_string());
         }
-        let (st, q) = hooks::next_status(s.status, ev);
+        let (mut st, q) = hooks::next_status(s.status, ev);
         let was = s.status;
+        if stop {
+            let tt = std::mem::take(&mut s.tempering_turn);
+            match hooks::on_stop(s.pr_flow, ev["last_assistant_message"].as_str().unwrap_or_default(), has_pr, tt) {
+                StopOutcome::Idle => {}
+                StopOutcome::NeedsInput => st = Status::NeedsInput,
+                StopOutcome::Quality => (s.pr_flow, quality) = (PrFlow::Reviewing, Some((s.worktree.clone(), title_of(s)))),
+                StopOutcome::Opened => s.pr_flow = PrFlow::Opened,
+            }
+        }
         s.status = st;
         if st != Status::NeedsInput {
             s.questions = None;
@@ -116,14 +139,25 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
             s.questions = q; // permission_prompt after AskUserQuestion keeps the question
         }
         (st == Status::NeedsInput && was != Status::NeedsInput).then(|| {
-            let text = s.questions.as_ref().and_then(|q| q[0]["question"].as_str()).or(ev["message"].as_str()).unwrap_or("Needs your input");
+            let text = if stop { "Claude stopped — reply needed?" } else { s.questions.as_ref().and_then(|q| q[0]["question"].as_str()).or(ev["message"].as_str()).unwrap_or("Needs your input") };
             (title_of(s), text.to_string())
         })
     });
     if let Some((t, b)) = note {
         notify(app, t, b);
     }
-    if ev["hook_event_name"] == "Stop" {
+    if let Some((wt, title)) = quality {
+        let ident = crate::inbox::find(app, task).map(|i| i.issue.identifier).unwrap_or(title); // worktree dir is the identifier
+        let base = git(Path::new(&wt), &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).unwrap_or_else(|_| "the default branch".into());
+        let (a, t) = (app.clone(), task.to_string());
+        std::thread::spawn(move || {
+            if let Err(e) = resume_task(a.clone(), t.clone(), Some(quality_prompt(&ident, &base))) {
+                with_session(&a, &t, |s| s.pr_flow = PrFlow::None);
+                crate::tempering::log(&a, &t, format!("Could not start quality pass: {e}"));
+            }
+        });
+    }
+    if stop {
         let (a, t) = (app.clone(), task.to_string());
         std::thread::spawn(move || crate::tempering::consume(&a, &t));
         crate::github::poke(app);
@@ -371,13 +405,13 @@ pub fn start_task(app: AppHandle, issue_id: String, permission_mode: PermissionM
     let wt = ensure_worktree(&home, repo, &i.identifier, &branch)?;
     write_hooks(&wt)?;
     exclude_settings(repo)?;
-    let prompt = format!("Work on Linear issue {}: {}\n{}\n\n{}", i.identifier, i.title, i.url, i.description);
+    let prompt = format!("Work on Linear issue {}: {}\n{}\n\n{}{DONE_SUFFIX}", i.identifier, i.title, i.url, i.description);
     update(&app, |g| {
         if g.ptys.contains_key(&issue_id) {
             return Err("already running".to_string());
         }
         let old = g.map.get(&issue_id).cloned();
-        g.map.insert(issue_id.clone(), SessionInfo { issue_id: issue_id.clone(), worktree: wt.to_string_lossy().into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode, tempering: old.as_ref().is_some_and(|o| o.tempering), reply_mode: old.as_ref().map(|o| o.reply_mode).unwrap_or_default(), escalations: vec![], memory: old.map(|o| o.memory).unwrap_or_default() });
+        g.map.insert(issue_id.clone(), SessionInfo { issue_id: issue_id.clone(), worktree: wt.to_string_lossy().into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode, tempering: old.as_ref().is_some_and(|o| o.tempering), reply_mode: old.as_ref().map(|o| o.reply_mode).unwrap_or_default(), escalations: vec![], pr_flow: old.as_ref().map(|o| o.pr_flow).unwrap_or_default(), tempering_turn: false, memory: old.map(|o| o.memory).unwrap_or_default() });
         Ok(())
     })?;
     spawn(&app, &issue_id, vec![prompt])
@@ -508,6 +542,16 @@ mod tests {
         assert!(ex.matches(".claude/settings.local.json").count() == 1 && ex.matches(".murim/").count() == 1);
         assert!(git(&wt, &["status", "--porcelain"]).unwrap().is_empty()); // ignored
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn prompts() {
+        assert!(DONE_SUFFIX.ends_with("the line MURIM_DONE."));
+        let p = quality_prompt("ENG-1", "origin/main");
+        for k in ["/ponytail:ponytail-review", "vs origin/main", "gh pr create --draft", "Fixes ENG-1", "not available", "no AI attribution"] {
+            assert!(p.contains(k), "{k}");
+        }
+        assert!(p.ends_with("line MURIM_PR_OPENED."));
     }
 
     #[test]

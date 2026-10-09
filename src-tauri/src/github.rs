@@ -1,3 +1,4 @@
+use crate::hooks::PrFlow;
 use crate::{sessions, tempering};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -102,6 +103,11 @@ pub fn derive_overall(p: &PrHealth) -> Overall {
     } else {
         ReadyToMerge
     }
+}
+
+/// Draft PR the quality pass opened, CI green: time to mark it ready (once).
+pub fn should_ready(flow: PrFlow, p: &PrHealth) -> bool {
+    flow == PrFlow::Opened && p.is_draft && p.state == PrState::Open && p.ci == Ci::Passing
 }
 
 /// GraphQL response -> health of the newest PR for the branch (None = no PR).
@@ -257,6 +263,15 @@ fn poll(app: &AppHandle) {
                 Err(e) => g.errs.insert(id.clone(), format!("{label}: cleanup failed: {e}")),
             };
         }
+        if sessions::with_session(app, id, |s| should_ready(s.pr_flow, &p).then(|| s.pr_flow = PrFlow::Ready)).flatten().is_some() {
+            match tempering::gh(&s.worktree, &["pr", "ready", &p.number.to_string()]) {
+                Ok(_) => tempering::log(app, id, format!("PR #{} marked ready for review (CI passing)", p.number)),
+                Err(e) => {
+                    sessions::with_session(app, id, |s| s.pr_flow = PrFlow::Opened);
+                    tempering::log(app, id, format!("Could not mark PR ready: {e}"));
+                }
+            }
+        }
         if let Some(d) = tempering::parse_detail(&j, &p) {
             details.push((id.clone(), d, p.clone()));
         }
@@ -341,6 +356,18 @@ mod tests {
         assert_eq!(pr(json!({"reviewDecision": "REVIEW_REQUIRED"})).overall, Overall::AwaitingReview);
         let none = pr(json!({"commits": {"nodes": [{"commit": {"statusCheckRollup": null}}]}}));
         assert_eq!(none.ci, Ci::None);
+    }
+
+    #[test]
+    fn ready_guard() {
+        let d = pr(json!({"isDraft": true}));
+        assert!(should_ready(PrFlow::Opened, &d));
+        assert!(!should_ready(PrFlow::Ready, &d)); // once
+        assert!(!should_ready(PrFlow::Reviewing, &d));
+        assert!(!should_ready(PrFlow::None, &d));
+        assert!(!should_ready(PrFlow::Opened, &pr(json!({}))));
+        let pend = json!({"isDraft": true, "commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "PENDING", "contexts": {"nodes": [{"__typename": "StatusContext", "context": "x", "state": "PENDING"}]}}}}]}});
+        assert!(!should_ready(PrFlow::Opened, &pr(pend)));
     }
 
     #[test]
