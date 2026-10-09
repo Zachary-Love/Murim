@@ -106,7 +106,7 @@ Server binds 127.0.0.1 only and requires a per-launch random token (any local pr
 ### Linear query
 
 Viewer's assigned issues where `cycle.isActive` and `state.type` not in `completed`/`canceled`.
-Duplicates = canceled + duplicate relation → hidden by the same filter (verify against schema).
+Duplicates are their own `state.type == "duplicate"` (verified in Linear's schema.graphql) → filter `nin: [completed, canceled, duplicate]`.
 Match on `state.type`, never `state.name`.
 
 ### PR health (deterministic checks)
@@ -171,6 +171,17 @@ Layout: Tauri v2 app at repo root — `src/` (React + Vite + TS, pnpm), `src-tau
 1. **Scaffold** — Tauri v2 + React/TS via pnpm; app name Murim; one window with sidebar (repos, empty) + main pane. `pnpm tauri build --debug` compiles.
 2. **Settings** — `src-tauri/src/settings.rs`: JSON at app config dir `{ repos_root, default_permission_mode: normal|allowlist|skip, caffeine }`; Linear API key in OS keychain (`keyring`). Commands `get_settings`, `save_settings`, `set_linear_key`, `has_linear_key`. UI `src/Settings.tsx`. Unit test: settings round-trip with defaults.
 3. **Caffeine** — `src-tauri/src/caffeine.rs`: `set_caffeine(bool)` spawns/kills `caffeinate -i -w <pid>` (macOS); state restored from settings on launch. Toggle in the sidebar footer. Check: toggling on shows `caffeinate` in `pgrep`, off removes it.
+
+### Phase 2 tasks
+
+Shared types (serde `camelCase`):
+- `Issue { id, identifier, title, url, branchName, stateName, stateType, priority, labels: Vec<String>, teamKey }`
+- `Repo { name, path }`, `RepoMatch { path, source: remembered|exact|semantic|claude|manual }`
+- `InboxItem { issue: Issue, repo: Option<RepoMatch> }`
+
+1. **Linear** — `src-tauri/src/linear.rs`: `pub fn fetch_cycle_issues(key) -> Result<Vec<Issue>>` (viewer's issues in active cycle, excluding completed/canceled/duplicate). Unit test: response JSON → filtered `Vec<Issue>`.
+2. **Repo matching** — `src-tauri/src/repo_match.rs`: `list_repos(root)`, `resolve(labels, issue_title, repos, remembered) -> Option<RepoMatch>` (exact/normalized → fastembed semantic → `claude -p --model haiku`); remembered map `repo_map` in settings. Unit test: exact/normalized + remembered tiers.
+3. **Inbox** — `src-tauri/src/inbox.rs` poll loop (60s + manual refresh) → `inbox-updated` event + `get_inbox`, `refresh_inbox`, `set_issue_repo` commands; UI groups by repo in sidebar, task list in main pane, "No repo" group with picker.
 
 Each phase ends with one runnable check (Rust unit test for the rules/state derivation; manual run for UI).
 

@@ -17,10 +17,24 @@ body, #root { margin: 0; height: 100vh; background: #0e0f11; }
 }
 .sidebar h1 { margin: 0 0 16px; font-size: 14px; font-weight: 600; letter-spacing: .02em; }
 .label { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #6b6f77; }
+.repos li { display: flex; justify-content: space-between; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+.repos li.on, .repos li:hover { background: #20232a; }
+.repos li span { color: #6b6f77; }
+.refresh { float: right; }
 .repos { flex: 1; margin: 8px 0; padding: 0; list-style: none; overflow-y: auto; }
 .sidebar-footer { padding-top: 10px; border-top: 1px solid #25272c; min-height: 40px; }
-.main { flex: 1; display: grid; place-items: center; color: #6b6f77; }
+.main { flex: 1; padding: 16px; overflow-y: auto; }
 
 .settings { display: flex; flex-direction: column; gap: 12px; max-width: 420px; }
 .settings label { display: flex; flex-direction: column; gap: 4px; }
 .settings .warn { color: #c0392b; margin: 0; }
+
+.banner { background: #3a1d1d; color: #e8a0a0; padding: 8px 12px; border-radius: 4px; margin-bottom: 12px; }
+.empty { color: #6b6f77; }
+.tasks { list-style: none; margin: 0; padding: 0; }
+.task { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid #25272c; }
+.task-main { flex: 1; min-width: 0; }
+.ident { color: #6b6f77; margin-right: 4px; }
+.meta { font-size: 11px; color: #6b6f77; }
+.tag { margin-left: 6px; padding: 0 6px; border-radius: 8px; background: #20232a; }
+.badge { font-size: 11px; color: #8a8f98; border: 1px solid #25272c; border-radius: 8px; padding: 0 6px; }

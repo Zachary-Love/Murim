@@ -17,6 +17,9 @@ pub struct Settings {
     pub repos_root: String,
     pub default_permission_mode: PermissionMode,
     pub caffeine: bool,
+    /// Linear label -> repo path (remembered matches).
+    #[serde(default)]
+    pub repo_map: std::collections::HashMap<String, String>,
 }
 
 impl Default for Settings {
@@ -26,6 +29,7 @@ impl Default for Settings {
             repos_root: format!("{home}/Documents/GitHub"),
             default_permission_mode: PermissionMode::default(),
             caffeine: false,
+            repo_map: Default::default(),
         }
     }
 }
@@ -48,7 +52,7 @@ pub fn dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_config_dir().map_err(|e| e.to_string())
 }
 
-fn entry() -> Result<keyring::Entry, String> {
+pub fn entry() -> Result<keyring::Entry, String> {
     keyring::Entry::new("dev.murim.app", "linear").map_err(|e| e.to_string())
 }
 
@@ -84,7 +88,7 @@ mod tests {
         let d = std::env::temp_dir().join(format!("murim-settings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         assert_eq!(load(&d), Settings::default()); // missing
-        let s = Settings { repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true };
+        let s = Settings { repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, repo_map: [("bug".to_string(), "/r".to_string())].into() };
         save(&d, &s).unwrap();
         assert_eq!(load(&d), s);
         std::fs::write(d.join("settings.json"), "{not json").unwrap();
