@@ -38,3 +38,13 @@ body, #root { margin: 0; height: 100vh; background: #0e0f11; }
 .meta { font-size: 11px; color: #6b6f77; }
 .tag { margin-left: 6px; padding: 0 6px; border-radius: 8px; background: #20232a; }
 .badge { font-size: 11px; color: #8a8f98; border: 1px solid #25272c; border-radius: 8px; padding: 0 6px; }
+a.ident { cursor: pointer; }
+a.ident:hover { color: #d4d6da; text-decoration: underline; }
+.err { color: #e8a0a0; font-size: 11px; }
+.badge.needsInput { color: #f0b429; border-color: #f0b429; }
+.badge.working, .badge.starting { color: #5aa9e6; }
+.pane { display: flex; flex-direction: column; height: 100%; gap: 8px; }
+.pane-head { display: flex; align-items: center; gap: 10px; }
+.pane-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.question { background: #2a2410; color: #f0d68a; padding: 8px 12px; border-radius: 4px; }
+.term { flex: 1; min-height: 0; }

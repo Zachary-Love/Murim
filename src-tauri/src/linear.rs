@@ -7,6 +7,7 @@ pub struct Issue {
     pub id: String,
     pub identifier: String,
     pub title: String,
+    pub description: String,
     pub url: String,
     pub branch_name: String,
     pub state_name: String,
@@ -18,7 +19,7 @@ pub struct Issue {
 
 // Linear's schema: WorkflowState.type is one of triage, backlog, unstarted, started,
 // completed, canceled, duplicate. Duplicates are the native "duplicate" state type.
-const QUERY: &str = r#"query($after: String) { viewer { assignedIssues(first: 100, after: $after, filter: { cycle: { isActive: { eq: true } }, state: { type: { nin: ["completed", "canceled", "duplicate"] } } }) { pageInfo { hasNextPage endCursor } nodes { id identifier title url branchName priority state { name type } labels { nodes { name } } team { key } } } } }"#;
+const QUERY: &str = r#"query($after: String) { viewer { assignedIssues(first: 100, after: $after, filter: { cycle: { isActive: { eq: true } }, state: { type: { nin: ["completed", "canceled", "duplicate"] } } }) { pageInfo { hasNextPage endCursor } nodes { id identifier title description url branchName priority state { name type } labels { nodes { name } } team { key } } } } }"#;
 
 pub fn fetch_cycle_issues(api_key: &str) -> Result<Vec<Issue>, String> {
     let (mut all, mut after) = (vec![], None);
@@ -56,6 +57,7 @@ fn parse(json: &Value) -> Result<(Vec<Issue>, Option<String>), String> {
             id: s(&n["id"]),
             identifier: s(&n["identifier"]),
             title: s(&n["title"]),
+            description: s(&n["description"]), // null -> ""
             url: s(&n["url"]),
             branch_name: s(&n["branchName"]),
             state_name: s(&n["state"]["name"]),
@@ -74,7 +76,7 @@ mod tests {
     use super::*;
 
     fn node(id: &str, ty: &str) -> Value {
-        json!({ "id": id, "identifier": format!("ENG-{id}"), "title": "t", "url": "u", "branchName": "b", "priority": 2,
+        json!({ "id": id, "identifier": format!("ENG-{id}"), "title": "t", "description": null, "url": "u", "branchName": "b", "priority": 2,
             "state": { "name": "S", "type": ty }, "labels": { "nodes": [{ "name": "bug" }, { "name": "ui" }] }, "team": { "key": "ENG" } })
     }
 
@@ -88,6 +90,7 @@ mod tests {
         assert_eq!(issues[0].identifier, "ENG-1");
         assert_eq!(issues[0].labels, ["bug", "ui"]);
         assert_eq!(issues[0].team_key, "ENG");
+        assert_eq!(issues[0].description, "");
         assert_eq!(next.as_deref(), Some("c1"));
         let e = json!({ "errors": [{ "message": "slow down", "extensions": { "code": "RATELIMITED" } }] });
         assert!(parse(&e).unwrap_err().contains("RATELIMITED"));

@@ -183,6 +183,27 @@ Shared types (serde `camelCase`):
 2. **Repo matching** — `src-tauri/src/repo_match.rs`: `list_repos(root)`, `resolve(labels, issue_title, repos, remembered) -> Option<RepoMatch>` (exact/normalized → fastembed semantic → `claude -p --model haiku`); remembered map `repo_map` in settings. Unit test: exact/normalized + remembered tiers.
 3. **Inbox** — `src-tauri/src/inbox.rs` poll loop (60s + manual refresh) → `inbox-updated` event + `get_inbox`, `refresh_inbox`, `set_issue_repo` commands; UI groups by repo in sidebar, task list in main pane, "No repo" group with picker.
 
+### Phase 3 tasks
+
+Worktrees live outside repos: `~/.murim/worktrees/<repo-name>/<IDENTIFIER>`, branch = `issue.branchName`
+(reuse if it exists), based on `origin/<default>` (fallback `HEAD`). Hooks use env `MURIM_PORT`,
+`MURIM_TOKEN`, `MURIM_TASK` set on the PTY child; `.claude/settings.local.json` added to the repo's
+`.git/info/exclude`. Permission modes → flags: normal = none; allowlist = `--permission-mode acceptEdits`
++ `--allowedTools` for git/gh/common build cmds; skip = `--dangerously-skip-permissions`.
+
+Contract between backend and UI (serde `camelCase`):
+- `SessionInfo { issueId, worktree, sessionId: Option, status: starting|working|needsInput|idle|ended, questions: Option<json>, ptyAlive, permissionMode }`
+- Commands: `start_task(issueId, permissionMode)`, `resume_task(issueId, prompt: Option)`, `stop_task(issueId)`,
+  `get_sessions() -> {issueId: SessionInfo}`, `pty_write(issueId, data)`, `pty_resize(issueId, cols, rows)`,
+  `pty_snapshot(issueId) -> base64` (ring buffer, last ~1MB)
+- Events: `sessions-updated` (full map), `pty-output { issueId, data: base64 }`
+
+1. **Backend** — `sessions.rs` (worktree, PTY, ring buffer, trust-dialog auto-answer, persistence to
+   `sessions.json`; on restart all sessions are `ended`/resumable) + `hooks.rs` (127.0.0.1 server, token,
+   pure `fn next_status(current, hook_json) -> Status` with unit tests) + OS notification on → needsInput.
+2. **UI** — Start button w/ permission-mode picker, status badges, task pane with xterm.js attached
+   (snapshot replay + live), input/resize, open Linear URL via `tauri-plugin-opener`.
+
 Each phase ends with one runnable check (Rust unit test for the rules/state derivation; manual run for UI).
 
 ## Open questions

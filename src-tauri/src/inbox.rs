@@ -122,6 +122,11 @@ fn spawn_resolver(app: AppHandle, issue: Issue, repos: Vec<Repo>, map: HashMap<S
     });
 }
 
+/// Current inbox item for an issue id (used by sessions to find issue + repo).
+pub fn find(app: &AppHandle, issue_id: &str) -> Option<InboxItem> {
+    state(app).inner.lock().unwrap().payload.items.iter().find(|it| it.issue.id == issue_id).cloned()
+}
+
 pub fn start(app: AppHandle) {
     std::thread::spawn(move || loop {
         poll(&app);
@@ -173,7 +178,7 @@ mod tests {
 
     #[test]
     fn manual_key_and_issue_key_lookup() {
-        let mut i = Issue { id: "abc".into(), identifier: "E-1".into(), title: "t".into(), url: "".into(), branch_name: "".into(), state_name: "".into(), state_type: "".into(), priority: 0, labels: vec![], team_key: "".into() };
+        let mut i = Issue { id: "abc".into(), identifier: "E-1".into(), title: "t".into(), description: "".into(), url: "".into(), branch_name: "".into(), state_name: "".into(), state_type: "".into(), priority: 0, labels: vec![], team_key: "".into() };
         assert_eq!(remember_key(&i), "issue:abc");
         let dir = std::env::temp_dir();
         let map: HashMap<_, _> = [(remember_key(&i), dir.to_string_lossy().to_string())].into();

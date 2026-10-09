@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Settings from "./Settings";
 import Caffeine from "./Caffeine";
-import Inbox, { Item, Repo, repoName } from "./Inbox";
+import Inbox, { Item, Repo, Session, Mode, repoName } from "./Inbox";
+import TaskPane from "./TaskPane";
 
 type Payload = { items: Item[]; error: string | null };
 const NONE = "\0none";
@@ -13,17 +14,25 @@ export default function App() {
   const [p, setP] = useState<Payload>({ items: [], error: null });
   const [repos, setRepos] = useState<Repo[]>([]);
   const [sel, setSel] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<Record<string, Session>>({});
+  const [mode, setMode] = useState<Mode>("normal");
+  const [open, setOpen] = useState<string | null>(null);
   useEffect(() => {
+    invoke<Record<string, Session>>("get_sessions").then(setSessions).catch(() => {});
+    invoke<{ defaultPermissionMode: Mode }>("get_settings").then((s) => setMode(s.defaultPermissionMode)).catch(() => {});
+    const us = listen<Record<string, Session>>("sessions-updated", (e) => setSessions(e.payload));
     invoke<Payload>("get_inbox").then(setP);
     invoke<Repo[]>("list_repos").then(setRepos).catch(() => {});
     const un = listen<Payload>("inbox-updated", (e) => setP(e.payload));
-    return () => { un.then((f) => f()); };
+    return () => { un.then((f) => f()); us.then((f) => f()); };
   }, []);
 
   const counts = new Map<string, number>();
   for (const i of p.items) counts.set(repoName(i) || NONE, (counts.get(repoName(i) || NONE) ?? 0) + 1);
   const groups = [...counts].sort(([a], [b]) => (a === NONE ? 1 : b === NONE ? -1 : a.localeCompare(b)));
   const shown = sel ? p.items.filter((i) => (repoName(i) || NONE) === sel) : p.items;
+
+  const openItem = p.items.find((i) => i.issue.id === open);
 
   return (
     <div className="app">
@@ -42,10 +51,12 @@ export default function App() {
         <footer className="sidebar-footer"><Caffeine /></footer>
       </aside>
       <main className="main">
-        {showSettings ? <Settings /> : (
+        {showSettings ? <Settings /> : openItem ? (
+          <TaskPane key={openItem.issue.id} item={openItem} session={sessions[openItem.issue.id]} onBack={() => setOpen(null)} />
+        ) : (
           <>
             {p.error && <div className="banner">{p.error}</div>}
-            <Inbox items={shown} repos={repos} />
+            <Inbox items={shown} repos={repos} sessions={sessions} defaultMode={mode} onOpen={setOpen} />
           </>
         )}
       </main>
