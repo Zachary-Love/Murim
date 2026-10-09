@@ -3,18 +3,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Settings from "./Settings";
 import Caffeine from "./Caffeine";
-import Inbox, { Item, Repo, Session, Mode, LogEntry, PrMap, SEV, repoName } from "./Inbox";
+import { Item, Repo, Session, Mode, LogEntry, PrMap, SEV, OVERALL, sortItems } from "./types";
+import { StateIcon, ClaudeIcon, PrIcon } from "./Icons";
 import TaskPane from "./TaskPane";
 
 type Payload = { items: Item[]; error: string | null };
 type PrPayload = { prs: PrMap; error?: string | null };
-const NONE = "\0none";
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [p, setP] = useState<Payload>({ items: [], error: null });
   const [repos, setRepos] = useState<Repo[]>([]);
-  const [sel, setSel] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Record<string, Session>>({});
   const [mode, setMode] = useState<Mode>("normal");
   const [prs, setPrs] = useState<PrMap>({});
@@ -36,12 +35,6 @@ export default function App() {
     return () => { ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); };
   }, []);
 
-  const counts = new Map<string, number>();
-  for (const i of p.items) counts.set(repoName(i) || NONE, (counts.get(repoName(i) || NONE) ?? 0) + 1);
-  const groups = [...counts].sort(([a], [b]) => (a === NONE ? 1 : b === NONE ? -1 : a.localeCompare(b)));
-  const red = new Set(p.items.filter((i) => SEV[prs[i.issue.id]?.overall] === "red").map((i) => repoName(i) || NONE));
-  const shown = sel ? p.items.filter((i) => (repoName(i) || NONE) === sel) : p.items;
-
   const openItem = p.items.find((i) => i.issue.id === open);
 
   return (
@@ -49,27 +42,31 @@ export default function App() {
       <aside className="sidebar">
         <h1>Murim <button className="refresh" title="Refresh" onClick={() => invoke("refresh_inbox")}>↻</button></h1>
         <button onClick={() => setShowSettings(!showSettings)}>Settings</button>
-        <div className="label">Repos</div>
-        <ul className="repos">
-          <li className={sel === null ? "on" : ""} onClick={() => { setSel(null); setShowSettings(false); }}>All <span>{p.items.length}</span></li>
-          {groups.map(([g, n]) => (
-            <li key={g} className={sel === g ? "on" : ""} onClick={() => { setSel(g); setShowSettings(false); }}>
-              {g === NONE ? "No repo" : g}{red.has(g) && <i className="dot" />} <span>{n}</span>
-            </li>
-          ))}
+        {p.error && <div className="banner">{p.error}</div>}
+        {prErr && <div className="banner">{prErr}</div>}
+        <ul className="tasks">
+          {sortItems(p.items, sessions, prs).map((i) => {
+            const id = i.issue.id, se = sessions[id], pr = prs[id];
+            return (
+              <li key={id} className={open === id && !showSettings ? "on" : ""} title={i.issue.title}
+                onClick={() => { setOpen(id); setShowSettings(false); }}>
+                <StateIcon type={i.issue.stateType} />
+                <span className="ident">{i.issue.identifier}</span>
+                <span className="t">{i.issue.title}</span>
+                <ClaudeIcon status={se?.status} />
+                {se?.tempering && <span title="Tempering">🔥</span>}
+                {pr && <PrIcon color={SEV[pr.overall] ?? "grey"} n={se?.escalations?.length} title={`${OVERALL[pr.overall] ?? pr.overall} #${pr.number}`} />}
+              </li>
+            );
+          })}
+          {!p.items.length && <li className="empty">No tasks</li>}
         </ul>
         <footer className="sidebar-footer"><Caffeine /></footer>
       </aside>
       <main className="main">
         {showSettings ? <Settings /> : openItem ? (
-          <TaskPane key={openItem.issue.id} item={openItem} session={sessions[openItem.issue.id]} pr={prs[openItem.issue.id]} log={logs[openItem.issue.id] ?? []} onBack={() => setOpen(null)} />
-        ) : (
-          <>
-            {prErr && <div className="banner">{prErr}</div>}
-            {p.error && <div className="banner">{p.error}</div>}
-            <Inbox items={shown} repos={repos} sessions={sessions} prs={prs} defaultMode={mode} onOpen={setOpen} />
-          </>
-        )}
+          <TaskPane key={openItem.issue.id} item={openItem} session={sessions[openItem.issue.id]} pr={prs[openItem.issue.id]} log={logs[openItem.issue.id] ?? []} repos={repos} defaultMode={mode} />
+        ) : <p className="empty">Select a task</p>}
       </main>
     </div>
   );

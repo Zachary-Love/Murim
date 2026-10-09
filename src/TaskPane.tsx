@@ -1,8 +1,14 @@
-import { useState } from "react";
+import { useState, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Terminal from "./Terminal";
-import { Item, Session, PrHealth, LABEL, OVERALL, SEV, prBadge, LogEntry, step } from "./Inbox";
+import IssueView from "./IssueView";
+import { Item, Session, PrHealth, Repo, Mode, LABEL, OVERALL, SEV, STEP, LogEntry } from "./types";
+
+const prBadge = (p: PrHealth) => (
+  <a className={`badge pr ${SEV[p.overall] ?? "grey"}`} title={p.title} onClick={() => openUrl(p.url)}>#{p.number} {OVERALL[p.overall] ?? p.overall}</a>
+);
+type Tab = "issue" | "claude" | "pr";
 
 // ponytail: questions shape is backend-defined JSON; accept {questions:[{question}]}, [{question}], or strings.
 const texts = (q: unknown): string[] => {
@@ -10,7 +16,9 @@ const texts = (q: unknown): string[] => {
   return (Array.isArray(a) ? a : []).map((x) => (typeof x === "string" ? x : (x as { question?: string })?.question ?? JSON.stringify(x)));
 };
 
-export default function TaskPane({ item, session, onBack, pr, log }: { item: Item; session?: Session; pr?: PrHealth; log: LogEntry[]; onBack: () => void }) {
+export default function TaskPane({ item, session, pr, log, repos, defaultMode }: { item: Item; session?: Session; pr?: PrHealth; log: LogEntry[]; repos: Repo[]; defaultMode: Mode }) {
+  const [tab, setTab] = useState<Tab>(session?.status === "needsInput" ? "claude" : "issue");
+  const [mode, setMode] = useState<Mode>(defaultMode);
   const [prompt, setPrompt] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -28,24 +36,69 @@ export default function TaskPane({ item, session, onBack, pr, log }: { item: Ite
     return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ago`;
   };
   const qs = session?.status === "needsInput" ? texts(session.questions) : [];
+  const alive = !!session?.ptyAlive;
+  const start = () => run("start_task", { permissionMode: mode }).then(() => setTab("claude"));
+  const pickRepo = !item.repo || item.repo.source === "semantic" || item.repo.source === "claude";
+  const T = ({ id, children }: { id: Tab; children: ReactNode }) => <button className={`tab ${tab === id ? "on" : ""}`} onClick={() => setTab(id)}>{children}</button>;
   return (
     <div className="pane">
       <div className="pane-head">
-        <button onClick={onBack}>← Back</button>
         <a className="ident" onClick={() => openUrl(item.issue.url)}>{item.issue.identifier}</a>
-        <span className="pane-title">{item.issue.title}</span>
+        <span className="pane-title" title={item.issue.title}>{item.issue.title}</span>
         {session && <span className={`badge ${session.status}`}>{LABEL[session.status]}</span>}
-        {session && step(session)}
-        {session && !session.ptyAlive && (
+        {session && <span className="step">{STEP[session.prFlow ?? "none"] ?? "Implementing"}</span>}
+        {pr && prBadge(pr)}
+      </div>
+      <div className="pane-head actions">
+        {item.resolving && <span className="badge">matching…</span>}
+        {pickRepo && (
+          <select value={item.repo?.path ?? ""} onChange={(e) => invoke("set_issue_repo", { issueId: id, path: e.target.value }).catch((x) => setErr(String(x)))}>
+            {!item.repo && <option value="" disabled>Pick repo…</option>}
+            {repos.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
+          </select>
+        )}
+        {!alive && (
           <>
-            <input placeholder="Prompt (optional)" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-            <button onClick={() => run("resume_task", { prompt: prompt || null })}>Resume</button>
+            <select value={mode} title="Permission mode" onChange={(e) => setMode(e.target.value as Mode)}>
+              <option value="normal">normal</option>
+              <option value="allowlist">allowlist</option>
+              <option value="skip">skip</option>
+            </select>
+            {mode === "skip" && <span title="Skips all permission prompts">⚠</span>}
+            <button disabled={!item.repo} onClick={start}>Start</button>
           </>
         )}
-        {session?.ptyAlive && <button onClick={() => run("stop_task")}>Stop</button>}
+        {session && !alive && (
+          <>
+            <input placeholder="Prompt (optional)" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+            <button onClick={() => run("resume_task", { prompt: prompt || null }).then(() => setTab("claude"))}>Resume</button>
+          </>
+        )}
+        {alive && <button onClick={() => run("stop_task")}>Stop</button>}
+        {pr && session && (
+          <>
+            <button className={session.tempering ? "on" : ""} onClick={() => run("set_tempering", { on: !session.tempering })}>🔥 Temper</button>
+            <select value={session.replyMode ?? "terse"} title="Reply mode" onChange={(e) => run("set_reply_mode", { mode: e.target.value })}>
+              <option value="off">Replies: off</option>
+              <option value="terse">Replies: terse</option>
+              <option value="full">Replies: full</option>
+            </select>
+          </>
+        )}
+        <button onClick={() => openUrl(item.issue.url)}>Open in Linear</button>
       </div>
       {err && <div className="banner">{err}</div>}
-      {qs.map((q, n) => <div key={n} className="question">{q}</div>)}
+      <div className="tabs"><T id="issue">Issue</T><T id="claude">Claude</T><T id="pr">PR{!!session?.escalations?.length && ` (${session.escalations.length})`}</T></div>
+      {tab === "issue" && <IssueView issueId={id} />}
+      {tab === "claude" && (
+        <>
+          {qs.map((q, n) => <div key={n} className="question">{q}</div>)}
+          <Terminal issueId={id} />
+        </>
+      )}
+      {tab === "pr" && (
+        <div className="prtab">
+          {!pr && <p className="empty">No pull request</p>}
       {pr && (
         <div className={`prbox ${SEV[pr.overall] ?? "grey"}`}>
           <div>{prBadge(pr)} <a onClick={() => openUrl(pr.url)}>{pr.title}</a> <button onClick={() => invoke("refresh_prs").catch((e) => setErr(String(e)))}>↻ PR</button></div>
@@ -59,15 +112,6 @@ export default function TaskPane({ item, session, onBack, pr, log }: { item: Ite
       )}
       {pr && session && (
         <div className="prbox temper">
-          <div>
-            <button className={session.tempering ? "on" : ""} onClick={() => run("set_tempering", { on: !session.tempering })}>🔥 Temper {session.tempering ? "on" : "off"}</button>
-            {" "}Replies:{" "}
-            <select value={session.replyMode ?? "terse"} onChange={(e) => run("set_reply_mode", { mode: e.target.value })}>
-              <option value="off">Off</option>
-              <option value="terse">Terse ≤5 words</option>
-              <option value="full">Full</option>
-            </select>
-          </div>
           {(session.escalations ?? []).map((x) => (
             <div key={x.id} className="esc">
               <div className="meta">{x.path}</div>
@@ -88,7 +132,8 @@ export default function TaskPane({ item, session, onBack, pr, log }: { item: Ite
           {log.length > 0 && <ul className="tlog">{log.map((l, n) => <li key={n}><span className="meta">{ago(l.at)}</span> {l.message}</li>)}</ul>}
         </div>
       )}
-      <Terminal issueId={id} />
+        </div>
+      )}
     </div>
   );
 }
