@@ -13,9 +13,7 @@ export default function Caffeine() {
       .catch((e) => setErr(String(e)));
   return (
     <>
-      <button className={`btn toggle ${on ? "on" : ""}`} aria-pressed={on} title="Keep this Mac awake so Claude keeps running" onClick={() => toggle(!on)}>
-        ☕ Caffeine {on ? "on" : "off"}
-      </button>
+      <button className={`btn icon ${on ? "on" : ""}`} aria-pressed={on} aria-label="Caffeine" title={`Caffeine ${on ? "on" : "off"}: keep this Mac awake so Claude keeps running`} onClick={() => toggle(!on)}>☕</button>
       {err && <div className="err">{err}</div>}
     </>
   );

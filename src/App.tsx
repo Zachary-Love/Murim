@@ -43,7 +43,6 @@ export default function App() {
         <header className="brand">
           <h1>Murim</h1>
           <button className="btn icon" title="Refresh tasks" onClick={() => invoke("refresh_inbox")}>↻</button>
-          <button className={`btn icon ${showSettings ? "on" : ""}`} title="Settings" onClick={() => setShowSettings(!showSettings)}>⚙</button>
         </header>
         <div className="section-label">My tasks <span className="count">{p.items.length}</span></div>
         {p.error && <div className="banner">{p.error}</div>}
@@ -67,7 +66,10 @@ export default function App() {
           })}
           {!p.items.length && <li className="empty">No tasks in your active cycle</li>}
         </ul>
-        <footer className="sidebar-footer"><Caffeine /></footer>
+        <footer className="sidebar-footer">
+          <Caffeine />
+          <button className={`btn icon ${showSettings ? "on" : ""}`} title="Settings" onClick={() => setShowSettings(!showSettings)}>⚙</button>
+        </footer>
       </aside>
       <main className="main">
         {showSettings ? <Settings /> : openItem ? (
