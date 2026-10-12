@@ -106,7 +106,11 @@ pub fn derive_overall(p: &PrHealth) -> Overall {
 
 /// GraphQL response -> health of the newest PR for the branch (None = no PR).
 pub fn parse_pr(json: &Value) -> Option<PrHealth> {
-    let n = json["data"]["repository"]["pullRequests"]["nodes"].get(0).filter(|n| n.is_object())?;
+    json["data"]["repository"]["pullRequests"]["nodes"].get(0).filter(|n| n.is_object()).and_then(pr_node)
+}
+
+/// One PullRequest node (PR_FIELDS selection) -> health.
+pub fn pr_node(n: &Value) -> Option<PrHealth> {
     let nodes = |v: &Value| v["nodes"].as_array().cloned().unwrap_or_default();
     let s = |v: &Value| v.as_str().unwrap_or_default().to_string();
     let rollup = &n["commits"]["nodes"][0]["commit"]["statusCheckRollup"];
@@ -178,7 +182,12 @@ pub fn token() -> Result<String, String> {
     }
 }
 
-const QUERY: &str = "query($o:String!,$n:String!,$b:String!){viewer{login} repository(owner:$o,name:$n){pullRequests(headRefName:$b,first:1,orderBy:{field:CREATED_AT,direction:DESC},states:[OPEN,MERGED,CLOSED]){nodes{number url title state isDraft mergeable reviewDecision headRefOid baseRefName reviewThreads(first:100){nodes{id path line isResolved isOutdated comments(last:10){nodes{databaseId author{login} body}}}} latestReviews(first:20){nodes{state}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name conclusion status databaseId checkSuite{workflowRun{databaseId}}} ... on StatusContext{context state}}}}}}}}}}}";
+/// GraphQL selection for one PR: shared by the per-branch poll and review mode.
+pub const PR_FIELDS: &str = "number url title state isDraft mergeable reviewDecision headRefOid baseRefName reviewThreads(first:100){nodes{id path line isResolved isOutdated comments(last:10){nodes{databaseId author{login} body}}}} latestReviews(first:20){nodes{state}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name conclusion status databaseId checkSuite{workflowRun{databaseId}}} ... on StatusContext{context state}}}}}}}";
+
+fn branch_query() -> String {
+    format!("query($o:String!,$n:String!,$b:String!){{viewer{{login}} repository(owner:$o,name:$n){{pullRequests(headRefName:$b,first:1,orderBy:{{field:CREATED_AT,direction:DESC}},states:[OPEN,MERGED,CLOSED]){{nodes{{{PR_FIELDS}}}}}}}}}")
+}
 
 pub fn gql(tok: &str, query: &str, vars: Value) -> Result<Value, String> {
     let j: Value = ureq::post("https://api.github.com/graphql")
@@ -196,7 +205,7 @@ pub fn gql(tok: &str, query: &str, vars: Value) -> Result<Value, String> {
 }
 
 fn query(tok: &str, owner: &str, name: &str, branch: &str) -> Result<Value, String> {
-    gql(tok, QUERY, json!({"o": owner, "n": name, "b": branch}))
+    gql(tok, &branch_query(), json!({"o": owner, "n": name, "b": branch}))
 }
 
 /// (repo path, owner, name, branch) for a session worktree.
@@ -231,6 +240,9 @@ fn poll(app: &AppHandle) {
     let old = gh.inner.lock().unwrap().payload.prs.clone();
     let (mut prs, mut error, mut details) = (HashMap::new(), None, vec![]);
     for (id, s) in &sess {
+        if id.starts_with("review:") {
+            continue; // review-mode checkouts are polled by reviews.rs
+        }
         let wt = Path::new(&s.worktree);
         if !wt.exists() {
             if let Some(p) = old.get(id) {
@@ -361,6 +373,15 @@ mod tests {
         let h = parse_pr(&j).unwrap();
         let d = tempering::parse_detail(&j, &h).unwrap();
         println!("{h:?}\n{d:?}");
+    }
+
+    #[test]
+    fn branch_query_unchanged_and_node_parse() {
+        let old = "query($o:String!,$n:String!,$b:String!){viewer{login} repository(owner:$o,name:$n){pullRequests(headRefName:$b,first:1,orderBy:{field:CREATED_AT,direction:DESC},states:[OPEN,MERGED,CLOSED]){nodes{number url title state isDraft mergeable reviewDecision headRefOid baseRefName reviewThreads(first:100){nodes{id path line isResolved isOutdated comments(last:10){nodes{databaseId author{login} body}}}} latestReviews(first:20){nodes{state}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name conclusion status databaseId checkSuite{workflowRun{databaseId}}} ... on StatusContext{context state}}}}}}}}}}}";
+        assert_eq!(branch_query(), old);
+        let n = json!({"number": 7, "url": "u", "title": "t", "state": "OPEN", "isDraft": true, "reviewThreads": {"nodes": []}, "commits": {"nodes": []}});
+        let p = pr_node(&n).unwrap();
+        assert_eq!((p.number, p.overall), (7, Overall::Draft));
     }
 
     #[test]
