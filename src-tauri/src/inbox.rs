@@ -163,9 +163,15 @@ pub fn set_issue_repo(app: AppHandle, state: State<Inbox>, issue_id: String, pat
     let key = remember_key(&it.issue);
     let d = settings::dir(&app)?;
     let mut s = settings::load(&d);
-    s.repo_map.insert(key, path.clone());
+    // "" = No repo: forget the pick and the guess; Claude then picks from the repos folder
+    let m = if path.is_empty() {
+        s.repo_map.remove(&key);
+        None
+    } else {
+        s.repo_map.insert(key, path.clone());
+        Some(RepoMatch { path, source: Source::Manual })
+    };
     settings::save(&d, &s)?;
-    let m = Some(RepoMatch { path, source: Source::Manual });
     g.cache.insert(issue_id.clone(), m.clone());
     if let Some(it) = g.payload.items.iter_mut().find(|it| it.issue.id == issue_id) {
         it.repo = m;

@@ -22,7 +22,6 @@ const texts = (q: unknown): string[] => {
 
 export default function TaskPane({ item, session, pr, log, repos, defaultMode, agent }: { item: Item; session?: Session; pr?: PrHealth; log: LogEntry[]; repos: Repo[]; defaultMode: Mode; agent: AgentKind }) {
   const [tab, setTab] = useState<Tab>(session?.status === "needsInput" ? "agent" : (session?.prFlow === "awaitingReview" || session?.prFlow === "opened") ? "review" : "issue");
-  const [prompt, setPrompt] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [own, setOwn] = useState<string | null>(null); // escalation id with open textarea
@@ -55,7 +54,7 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode, a
   // a running session keeps the agent it started with; otherwise Settings decides what Start launches
   const custom = (session?.agent ?? agent) === "custom";
   const start = () => run("start_task", { permissionMode: defaultMode }).then(() => setTab("agent"));
-  const resume = () => run("resume_task", { prompt: prompt || null }).then(() => setTab("agent"));
+  const resume = () => run("resume_task", { prompt: null }).then(() => setTab("agent"));
   // unconfirmed repo: Claude starts in the repos folder and names it (MURIM_REPO); custom agents need a repo (or the guess)
   const guess = !item.repo || item.repo.source === "semantic" || item.repo.source === "claude";
   const canStart = !!item.repo || !custom;
@@ -74,22 +73,17 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode, a
           <T id="pr">PR{pr && ` #${pr.number}`}{!!session?.escalations?.length && <span className="count">{session.escalations.length}</span>}</T>
         </nav>
         <div className="topbar-right">
-          <button className="chip mono" title="Open in Linear" onClick={() => openUrl(item.issue.url)}>{item.issue.identifier} ↗</button>
           {item.resolving && <span className="chip">Matching repo…</span>}
           <span className="repo-pick">
-            <button className="btn" title={guess && item.repo ? `Likely ${repoName(item)} (guess). Pick the repo` : "Pick the repo"} onClick={() => setPicking(!picking)}><FolderIcon />{guess && !custom ? "auto" : repoName(item) || "Pick repo…"}</button>
-            {picking && <div className="popover">{repos.map((r) => <button key={r.path} className={r.path === item.repo?.path ? "on" : ""} onClick={() => pickRepo(r.path)}>{r.name}</button>)}</div>}
+            <button className="btn" title={guess && item.repo ? `Likely ${repoName(item)} (guess). Pick the repo` : "Pick the repo"} onClick={() => setPicking(!picking)}><FolderIcon />{!guess && repoName(item)}</button>
+            {picking && <div className="popover"><button className={item.repo ? "" : "on"} onClick={() => pickRepo("")}>No repo</button>{repos.map((r) => <button key={r.path} className={r.path === item.repo?.path ? "on" : ""} onClick={() => pickRepo(r.path)}>{r.name}</button>)}</div>}
           </span>
           {alive ? (
             <button className="btn danger" onClick={() => run("stop_task")}>■ Stop agent</button>
+          ) : session ? (
+            <button className={`btn ${session.prFlow === "awaitingReview" ? "" : "primary"}`} onClick={resume}>↻ Resume agent</button>
           ) : (
-            <button className={`btn ${session ? "" : "primary"}`} disabled={!canStart} title={!canStart ? "Pick a repo first" : guess && !custom ? "Claude confirms the repo from your repos folder, then starts in its worktree" : session ? "Start a fresh agent session in this worktree" : ""} onClick={start}>{session ? "New session" : "Start agent"}</button>
-          )}
-          {session && !alive && (
-            <>
-              <input placeholder="Follow-up prompt (optional)" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-              <button className={`btn ${session.prFlow === "awaitingReview" ? "" : "primary"}`} onClick={resume}>↻ Resume agent</button>
-            </>
+            <button className="btn primary" disabled={!canStart} title={!canStart ? "Pick a repo first" : guess && !custom ? "Claude confirms the repo from your repos folder, then starts in its worktree" : ""} onClick={start}>Start agent</button>
           )}
           {pr && session && !custom && (
             <button className={`btn toggle ${session.tempering ? "on" : ""}`} title="Babysit the PR: rerun CI, fix failures, answer reviews (reply style is in Settings)" onClick={() => run("set_tempering", { on: !session.tempering })}><FlameIcon /> Tempering {session.tempering ? "on" : "off"}</button>
