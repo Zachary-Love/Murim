@@ -47,8 +47,8 @@ export default function App() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <header className="brand">
-          <h1><img className="logo" src={logo} alt="" />Murim</h1>
+        <header className="brand" data-tauri-drag-region>
+          <h1 data-tauri-drag-region><img className="logo" src={logo} alt="" />Murim</h1>
           <button className="btn icon" title="Refresh tasks" onClick={() => invoke("refresh_inbox")}>↻</button>
         </header>
         <div className="section-label">My tasks <span className="count">{p.items.length}</span></div>

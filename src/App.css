@@ -67,7 +67,8 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 /* ---- layout ---- */
 .app { display: flex; height: 100%; }
 .sidebar { width: 296px; flex: none; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--line); }
-.brand { display: flex; align-items: center; gap: 4px; padding: 12px 12px 8px; }
+/* no native title bar: macOS traffic lights overlay the sidebar header, so leave room and keep both bars draggable */
+.brand { display: flex; align-items: center; gap: 4px; height: 52px; padding: 0 12px 0 80px; }
 .brand h1 { display: flex; align-items: center; gap: 6px; flex: 1; font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: .01em; }
 .brand .btn.icon { background: none; border-color: transparent; color: var(--muted); }
 .brand .btn.icon:hover, .brand .btn.icon.on { background: var(--hover); border-color: var(--line-hi); color: var(--text); }
@@ -177,7 +178,7 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .settings .group { display: flex; } .grow { flex: 1; }
 
 /* top bar: sections left, task info + actions right */
-.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 52px; padding: 8px 16px; border-bottom: 1px solid var(--line); }
 .topbar .seg { margin: 0; }
 .topbar-right { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
 .topbar-right input { width: 180px; }

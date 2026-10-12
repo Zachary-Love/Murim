@@ -65,14 +65,14 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode, a
   const addShell = () => invoke<string>("open_shell", { issueId: id }).then((t) => { setShells((v) => [...v, t]); showTerm(t); setErr(""); }).catch((e) => setErr(String(e)));
   return (
     <div className="pane">
-      <header className="topbar">
+      <header className="topbar" data-tauri-drag-region>
         <nav className="seg">
           <T id="issue">Issue</T>
           <T id="agent">Agent<AgentIcon status={session?.status} /></T>
           {hasWt && <T id="review">Review{(session?.prFlow === "awaitingReview" || session?.prFlow === "opened") && <span className="count attn">1</span>}</T>}
           <T id="pr">PR{pr && ` #${pr.number}`}{!!session?.escalations?.length && <span className="count">{session.escalations.length}</span>}</T>
         </nav>
-        <div className="topbar-right">
+        <div className="topbar-right" data-tauri-drag-region>
           {item.resolving && <span className="chip">Matching repo…</span>}
           <span className="repo-pick">
             <button className="btn" title={guess && item.repo ? `Likely ${repoName(item)} (guess). Pick the repo` : "Pick the repo"} onClick={() => setPicking(!picking)}><FolderIcon />{!guess && repoName(item)}</button>
