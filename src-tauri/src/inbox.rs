@@ -70,6 +70,9 @@ fn poll(app: &AppHandle) {
     let Some(key) = settings::entry().ok().and_then(|e| e.get_password().ok()) else {
         return set_err("Add your Linear API key in Settings", true);
     };
+    if settings::dir(app).map(|d| settings::load(&d).repos_root.is_empty()).unwrap_or(true) {
+        return set_err("Choose your repos folder in Settings", true);
+    }
     let issues = match crate::linear::fetch_cycle_issues(&key) {
         Ok(v) => v,
         Err(e) => return set_err(&e, false),

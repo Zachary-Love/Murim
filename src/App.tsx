@@ -27,7 +27,7 @@ export default function App() {
     const us = listen<Record<string, Session>>("sessions-updated", (e) => setSessions(e.payload));
     invoke<Payload>("get_inbox").then(setP);
     invoke<Repo[]>("list_repos").then(setRepos).catch(() => {});
-    const un = listen<Payload>("inbox-updated", (e) => setP(e.payload));
+    const un = listen<Payload>("inbox-updated", (e) => { setP(e.payload); invoke<Repo[]>("list_repos").then(setRepos).catch(() => {}); });
     const setPp = (v: PrPayload) => { setPrs(v.prs ?? {}); setPrErr(v.error ?? null); };
     invoke<PrPayload>("get_prs").then(setPp).catch(() => {}); // ponytail: tolerate backend without get_prs
     const up = listen<PrPayload>("prs-updated", (e) => setPp(e.payload));

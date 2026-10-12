@@ -11,27 +11,16 @@ pub enum PermissionMode {
     Skip,
 }
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 #[serde(default)]
 pub struct Settings {
+    /// Folder holding the user's repos; empty until they choose one (no guessed default).
     pub repos_root: String,
     pub default_permission_mode: PermissionMode,
     pub caffeine: bool,
     /// Linear label -> repo path (remembered matches).
     #[serde(default)]
     pub repo_map: std::collections::HashMap<String, String>,
-}
-
-impl Default for Settings {
-    fn default() -> Self {
-        let home = std::env::var("HOME").unwrap_or_default();
-        Settings {
-            repos_root: format!("{home}/Documents/GitHub"),
-            default_permission_mode: PermissionMode::default(),
-            caffeine: false,
-            repo_map: Default::default(),
-        }
-    }
 }
 
 /// Missing or corrupt file yields defaults.

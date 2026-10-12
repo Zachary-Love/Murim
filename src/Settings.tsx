@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { MODE_LABEL } from "./types";
 
 type S = { repos_root: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean };
@@ -24,6 +25,7 @@ export default function Settings() {
         setKey("");
         setHasKey(await invoke<boolean>("has_linear_key"));
       }
+      invoke("refresh_inbox").catch(() => {}); // pick up a new repos folder / key now, not at the next poll
       setMsg("Saved");
     } catch (e) {
       setMsg(String(e));
@@ -34,7 +36,13 @@ export default function Settings() {
     <form className="settings" onSubmit={(e) => { e.preventDefault(); save(); }}>
       <h2>Settings</h2>
       <label>Repos folder
-        <input value={s.repos_root} onChange={(e) => setS({ ...s, repos_root: e.target.value })} />
+        <div className="group">
+          <input className="grow" value={s.repos_root} placeholder="Folder that contains your git repos" onChange={(e) => setS({ ...s, repos_root: e.target.value })} />
+          <button type="button" className="btn" onClick={async () => {
+            const dir = await open({ directory: true, defaultPath: s.repos_root || undefined, title: "Choose your repos folder" });
+            if (typeof dir === "string") setS({ ...s, repos_root: dir });
+          }}>Choose…</button>
+        </div>
       </label>
       <label>Default Claude permission mode
         <select value={s.default_permission_mode}

@@ -19,6 +19,7 @@ pub fn run() {
     }
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![settings::get_settings, settings::save_settings, settings::set_linear_key, settings::has_linear_key, caffeine::set_caffeine, caffeine::get_caffeine, inbox::get_inbox, inbox::refresh_inbox, inbox::list_repos, inbox::set_issue_repo, linear::get_issue_detail, sessions::start_task, sessions::resume_task, sessions::stop_task, sessions::get_sessions, sessions::pty_write, sessions::pty_resize, sessions::pty_snapshot, github::get_prs, github::refresh_prs, tempering::set_tempering, tempering::set_reply_mode, tempering::resolve_escalation, review::get_review, review::accept_pr, review::request_changes])
         .manage(caffeine::Caffeine::default())
