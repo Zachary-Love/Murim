@@ -60,3 +60,4 @@ export type ReviewPr = {
 };
 export type ReviewFilters = { authors: string[]; statuses: Bucket[] };
 export const BUCKET_LABEL: Record<Bucket, string> = { needsReview: "Needs review", draft: "Draft", ciFailing: "CI failing", changesRequested: "Changes requested", approved: "Approved" };
+export type Draft = { summary: string; event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; comments: { path: string; line: number; body: string }[] };

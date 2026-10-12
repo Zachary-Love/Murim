@@ -223,3 +223,20 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .avatar { width: 16px; height: 16px; flex: none; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; object-fit: cover; font-size: 9px; font-weight: 600; color: var(--text); background: var(--line-hi); }
 .avatar.unlinked { background: none; border: 1px dashed var(--dim); color: var(--dim); }
 .dot-req { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
+
+/* review pane */
+.chip.req { color: var(--brand); border-color: #f43f5e66; }
+.rv-overview { display: flex; flex-direction: column; gap: 10px; }
+.rv-overview h2 { font-size: 15px; color: var(--text); }
+.review-agent { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.review-agent > .term { margin-top: 10px; }
+.review-agent .draft { flex: none; max-height: 45%; min-height: 0; margin: 0 16px 16px; }
+.draft-body { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.draft .q-head { justify-content: space-between; }
+.draft .reload { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--accent); }
+.draft textarea { min-height: 56px; }
+.draft .banner pre { margin: 6px 0 0; max-height: 160px; overflow: auto; white-space: pre-wrap; color: var(--text-2); }
+.draft-comment { display: flex; flex-direction: column; gap: 4px; }
+.draft-comment .meta { display: flex; align-items: center; justify-content: space-between; }
+.draft-comment .x { background: none; border: 0; color: var(--dim); cursor: pointer; font-size: 14px; }
+.draft-comment .x:hover { color: var(--red); }

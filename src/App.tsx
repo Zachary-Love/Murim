@@ -8,6 +8,7 @@ import { Item, Repo, Session, Mode, AgentKind, LogEntry, PrMap, SEV, OVERALL, Re
 import { StateIcon, AgentIcon, PrIcon, GearIcon, FlameIcon, TasksIcon, ReviewsIcon } from "./Icons";
 import TaskPane from "./TaskPane";
 import ReviewList from "./ReviewList";
+import ReviewPane from "./ReviewPane";
 import logo from "./assets/logo-mark.svg";
 
 type Payload = { items: Item[]; error: string | null };
@@ -54,6 +55,7 @@ export default function App() {
   }, [showSettings]);
   const openItem = p.items.find((i) => i.issue.id === open);
   const requested = rv.prs.filter((r) => r.requested).length;
+  const openPr = rv.prs.find((r) => r.key === openReview);
 
   return (
     <div className="app">
@@ -100,8 +102,9 @@ export default function App() {
         </>}
       </aside>
       <main className="main">
-        {showSettings ? <Settings /> : view === "reviews" ? (
-          <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Select a pull request to review.</p></div>
+        {showSettings ? <Settings /> : view === "reviews" ? (openPr
+          ? <ReviewPane key={openPr.key} pr={openPr} session={sessions[openPr.sessionId]} />
+          : <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Select a pull request to review.</p></div>
         ) : openItem ? (
           <TaskPane key={openItem.issue.id} item={openItem} session={sessions[openItem.issue.id]} pr={prs[openItem.issue.id]} log={logs[openItem.issue.id] ?? []} repos={repos} defaultMode={mode} agent={agent} />
         ) : <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Select a task to start working on it.</p></div>}
