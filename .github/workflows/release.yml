@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag like v0.2.0 to build a universal macOS .dmg and publish it as a GitHub release.
+# Push a tag like v0.2.0 to build an Apple Silicon .dmg and publish it as a GitHub release.
 on:
   push:
     tags: ["v*"]
@@ -21,7 +21,6 @@ jobs:
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
@@ -36,9 +35,10 @@ jobs:
           releaseName: Murim ${{ github.ref_name }}
           releaseDraft: false
           prerelease: false
-          args: --target universal-apple-darwin --bundles dmg
+          # ponytail: Apple Silicon only; ort (fastembed) has no prebuilt x86_64-apple-darwin binaries. Intel needs ort built from source.
+          args: --bundles dmg
           releaseBody: |
-            Download the `.dmg` below, open it, and drag Murim into Applications. Runs on Apple Silicon and Intel Macs.
+            Download the `.dmg` below, open it, and drag Murim into Applications. Requires an Apple Silicon Mac (M1 or newer).
 
             Murim isn't signed by Apple yet, so macOS blocks the first launch. Either try to open it, then go to
             System Settings → Privacy & Security → **Open Anyway**, or run `xattr -cr /Applications/Murim.app` once.

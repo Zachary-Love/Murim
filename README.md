@@ -16,7 +16,7 @@ macOS only for now. Version 0.1.0 is early software.
 ## Install
 
 Download the latest `.dmg` from [Releases](https://github.com/Zachary-Love/Murim/releases/latest), open it, and drag
-Murim into Applications. It runs on Apple Silicon and Intel Macs.
+Murim into Applications. Requires an Apple Silicon Mac (M1 or newer).
 
 Murim isn't signed by Apple yet, so macOS blocks the first launch. Either try to open it, then go to
 System Settings → Privacy & Security → **Open Anyway**, or run `xattr -cr /Applications/Murim.app` once.
@@ -63,7 +63,7 @@ See [plan.md](plan.md) for the design.
 ## Releasing
 
 Bump the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, commit, then
-push a tag: `git tag v0.2.0 && git push origin v0.2.0`. GitHub Actions builds a universal `.dmg` and publishes
+push a tag: `git tag v0.2.0 && git push origin v0.2.0`. GitHub Actions builds the Apple Silicon `.dmg` and publishes
 the release.
 
 ## License
