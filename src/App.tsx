@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Settings from "./Settings";
 import Caffeine from "./Caffeine";
-import { Item, Repo, Session, Mode, LogEntry, PrMap, SEV, OVERALL, sortItems } from "./types";
+import { Item, Repo, Session, Mode, LogEntry, PrMap, SEV, OVERALL, sortItems, stage } from "./types";
 import { StateIcon, ClaudeIcon, PrIcon, ClaudeMark } from "./Icons";
 import TaskPane from "./TaskPane";
 
@@ -55,7 +55,7 @@ export default function App() {
               <li key={id}>
                 <button className={`row ${open === id && !showSettings ? "on" : ""} ${se?.status === "needsInput" ? "attn" : ""}`} title={i.issue.title}
                 onClick={() => { setOpen(id); setShowSettings(false); }}>
-                <StateIcon type={i.issue.stateType} />
+                <StateIcon stage={stage(i, se, pr)} backlog={i.issue.stateType === "backlog"} />
                 <span className="ident">{i.issue.identifier}</span>
                 <span className="t">{i.issue.title}</span>
                 <ClaudeIcon status={se?.status} />

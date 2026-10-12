@@ -1,15 +1,26 @@
-import type { Status } from "./types";
+import { STAGE_LABEL, type Stage, type Status } from "./types";
 
 const S = { width: 14, height: 14, viewBox: "0 0 14 14", fill: "none", strokeWidth: 1.5 } as const;
 
-// Mimics Linear's workflow-state icons.
-export const StateIcon = ({ type }: { type: string }) => {
-  const c = type === "started" ? "#f2c94c" : type === "triage" ? "#f2994a" : "#8a8f98";
+// Linear-style stage icon: ring for todo, filling pie as the task advances, check when done.
+export const StateIcon = ({ stage, backlog }: { stage: Stage; backlog?: boolean }) => {
+  const pie = (f: number) => {
+    const a = 2 * Math.PI * f, x = 7 + 3.5 * Math.sin(a), y = 7 - 3.5 * Math.cos(a);
+    return `M7 7V3.5A3.5 3.5 0 ${f > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}z`;
+  };
   return (
-    <svg {...S} stroke={c} className="ico">
-      <circle cx="7" cy="7" r="5.5" strokeDasharray={type === "backlog" ? "2 2" : undefined} />
-      {type === "started" && <path d="M7 3.5a3.5 3.5 0 0 1 0 7z" fill={c} stroke="none" />}
-      {type === "triage" && <circle cx="7" cy="7" r="2" fill={c} stroke="none" />}
+    <svg {...S} className={`ico stage ${stage}`} stroke="currentColor">
+      <title>{STAGE_LABEL[stage]}</title>
+      {stage === "done" ? (
+        <><circle cx="7" cy="7" r="6" fill="currentColor" stroke="none" /><path d="M4.5 7.2l1.7 1.7 3.4-3.6" stroke="var(--bg)" strokeWidth="1.6" /></>
+      ) : (
+        <>
+          <circle cx="7" cy="7" r="5.5" strokeDasharray={backlog && stage === "todo" ? "2 2" : undefined} />
+          {stage === "progress" && <path d={pie(0.5)} fill="currentColor" stroke="none" />}
+          {stage === "needsReview" && <path d={pie(0.75)} fill="currentColor" stroke="none" />}
+          {stage === "codeReview" && <path d={pie(0.9)} fill="currentColor" stroke="none" />}
+        </>
+      )}
     </svg>
   );
 };

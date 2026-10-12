@@ -159,3 +159,5 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .pri.red { color: var(--red); } .pri.amber { color: var(--amber); } .pri.blue { color: var(--blue); } .pri.green { color: var(--green); } .pri.grey { color: var(--dim); }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: .45; } }
+.stage.todo { color: #e5e5e5; } .stage.progress { color: var(--amber); } .stage.needsReview { color: #a78bfa; }
+.stage.codeReview { color: var(--green); } .stage.done { color: var(--blue); }

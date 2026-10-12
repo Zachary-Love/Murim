@@ -40,3 +40,14 @@ export const sortItems = (a: Item[], m: Record<string, Session>, prs: PrMap = {}
     return g(x) - g(y) || rank(x) - rank(y);
   });
 export const repoName = (i: Item) => i.repo?.path.split("/").filter(Boolean).pop() ?? "";
+
+// The task's overall stage, from Linear state + Claude session + PR. Drives the sidebar status dot.
+export type Stage = "todo" | "progress" | "needsReview" | "codeReview" | "done";
+export const STAGE_LABEL: Record<Stage, string> = { todo: "Todo", progress: "In progress", needsReview: "Needs your review", codeReview: "In code review", done: "Done" };
+export const stage = (i: Item, s?: Session, pr?: PrHealth): Stage => {
+  if (i.issue.stateType === "completed" || pr?.overall === "merged") return "done";
+  if (pr && pr.state === "OPEN" && !pr.isDraft) return "codeReview";
+  if (s?.status === "needsInput" || s?.escalations?.length || (pr?.isDraft && s?.status !== "working" && s?.status !== "starting")) return "needsReview";
+  if (i.issue.stateType === "started" || s) return "progress";
+  return "todo";
+};
