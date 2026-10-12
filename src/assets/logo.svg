@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Soft Red Aura / Glow Filter -->
+    <filter id="bladeGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12" result="blur1" />
+      <feGaussianBlur stdDeviation="24" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <!-- Linear Gradient for Blade Facets -->
+    <linearGradient id="bladeMain" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#e11d48" />
+      <stop offset="60%" stop-color="#be123c" />
+      <stop offset="100%" stop-color="#881337" />
+    </linearGradient>
+
+    <linearGradient id="bladeHighlight" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#fb7185" />
+      <stop offset="70%" stop-color="#f43f5e" />
+      <stop offset="100%" stop-color="#e11d48" />
+    </linearGradient>
+
+    <!-- Background Light Soft Radial Gradient -->
+    <radialGradient id="bgLight" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#f4f4f5" />
+    </radialGradient>
+  </defs>
+
+  <!-- Clean Canvas Background -->
+  <rect width="512" height="512" fill="url(#bgLight)" />
+
+  <!-- Main Blade Graphic Group -->
+  <g filter="url(#bladeGlow)">
+    <!-- Base Glow Underlay -->
+    <path d="M 180 340 L 310 200 L 322 160 L 305 185 Z" fill="#f43f5e" opacity="0.6" />
+
+    <!-- Left / Upper Facet -->
+    <path d="M 180 340 L 310 200 L 322 160 Z" fill="url(#bladeHighlight)" />
+
+    <!-- Right / Lower Facet (Adds the 3D blade edge) -->
+    <path d="M 180 340 L 310 200 L 305 185 Z" fill="url(#bladeMain)" />
+  </g>
+</svg>

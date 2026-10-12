@@ -6,6 +6,7 @@ import Caffeine from "./Caffeine";
 import { Item, Repo, Session, Mode, LogEntry, PrMap, SEV, OVERALL, sortItems, stage } from "./types";
 import { StateIcon, ClaudeIcon, PrIcon, ClaudeMark, GearIcon } from "./Icons";
 import TaskPane from "./TaskPane";
+import logo from "./assets/logo-mark.svg";
 
 type Payload = { items: Item[]; error: string | null };
 type PrPayload = { prs: PrMap; error?: string | null };
@@ -41,7 +42,7 @@ export default function App() {
     <div className="app">
       <aside className="sidebar">
         <header className="brand">
-          <h1>Murim</h1>
+          <h1><img className="logo" src={logo} alt="" />Murim</h1>
           <button className="btn icon" title="Refresh tasks" onClick={() => invoke("refresh_inbox")}>↻</button>
         </header>
         <div className="section-label">My tasks <span className="count">{p.items.length}</span></div>

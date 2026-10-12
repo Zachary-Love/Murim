@@ -71,7 +71,7 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .app { display: flex; height: 100%; }
 .sidebar { width: 296px; flex: none; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--line); }
 .brand { display: flex; align-items: center; gap: 4px; padding: 12px 12px 8px; }
-.brand h1 { flex: 1; font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: .01em; }
+.brand h1 { display: flex; align-items: center; gap: 6px; flex: 1; font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: .01em; }
 .brand .btn.icon { background: none; border-color: transparent; color: var(--muted); }
 .brand .btn.icon:hover, .brand .btn.icon.on { background: var(--hover); border-color: var(--line-hi); color: var(--text); }
 .section-label { display: flex; align-items: center; gap: 6px; padding: 8px 14px 4px; font-size: 11px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .05em; }
@@ -183,3 +183,4 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .diff .hunk { color: var(--blue); background: #5aa9e60f; }
 .review > * { flex-shrink: 0; }
 .md h1, .md h2, .md h3 { font-size: 14px; margin: 10px 0 4px; color: var(--text); }
+.brand .logo { width: 18px; height: 22px; }
