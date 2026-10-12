@@ -10,6 +10,12 @@ mod tempering;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Launched from an editor's terminal (e.g. `pnpm tauri dev` in VS Code)? Drop its askpass hooks before any thread or child starts.
+    for (k, _) in std::env::vars() {
+        if sessions::editor_var(&k) {
+            std::env::remove_var(k);
+        }
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())

@@ -190,13 +190,23 @@ fn parse_shell_env(out: &str) -> (Vec<(String, String)>, Option<String>) {
         .split_once("__MURIM_ENV__\n")
         .map(|(_, env)| env.split('\0').filter_map(|kv| kv.split_once('=')).filter(|(k, _)| !k.is_empty() && !k.contains('\n')).map(|(k, v)| (k.into(), v.into())).collect())
         .unwrap_or_default();
-    (if vars.iter().any(|(k, _)| k == "PATH") { vars } else { std::env::vars().collect() }, claude)
+    let mut vars: Vec<(String, String)> = if vars.iter().any(|(k, _)| k == "PATH") { vars } else { std::env::vars().collect() };
+    vars.retain(|(k, _)| !editor_var(k));
+    // git asks `gh` for GitHub credentials (after any existing helper, e.g. osxkeychain), so no editor or TTY prompt is needed.
+    // ponytail: clobbers a user-set GIT_CONFIG_COUNT; append to it if anyone ever relies on that.
+    vars.extend([("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "credential.https://github.com.helper"), ("GIT_CONFIG_VALUE_0", "!gh auth git-credential"), ("GIT_TERMINAL_PROMPT", "0")].map(|(k, v)| (k.into(), v.into())));
+    (vars, claude)
+}
+
+/// Vars an editor's terminal injects (VS Code's GIT_ASKPASS pops a VS Code auth dialog); Murim must not inherit them.
+pub fn editor_var(k: &str) -> bool {
+    matches!(k, "GIT_ASKPASS" | "SSH_ASKPASS") || k.starts_with("VSCODE_") || k.starts_with("TERM_PROGRAM")
 }
 
 // ---- worktree + hook settings ----
 
 pub fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let o = Command::new("git").arg("-C").arg(repo).args(args).output().map_err(|e| e.to_string())?;
+    let o = Command::new("git").arg("-C").arg(repo).args(args).envs(shell_env().0.iter().map(|(k, v)| (k, v))).stdin(std::process::Stdio::null()).output().map_err(|e| e.to_string())?;
     if o.status.success() {
         Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
     } else {
@@ -515,6 +525,9 @@ mod tests {
         assert_eq!(claude.as_deref(), Some("/x/claude"));
         assert!(vars.contains(&("PATH".into(), "/a:/b".into())));
         assert!(vars.contains(&("GITHUB_TOKEN".into(), "t=1".into())));
+        let (vars, _) = parse_shell_env("__MURIM_ENV__\nPATH=/a\0GIT_ASKPASS=/vscode\0VSCODE_GIT_IPC_HANDLE=x\0");
+        assert!(!vars.iter().any(|(k, _)| editor_var(k)));
+        assert!(vars.contains(&("GIT_CONFIG_VALUE_0".into(), "!gh auth git-credential".into())));
         let (vars, claude) = parse_shell_env("MURIM_CLAUDE=\n"); // no marker → own env
         assert!(claude.is_none() && vars.iter().any(|(k, _)| k == "PATH"));
     }
