@@ -271,8 +271,13 @@ fn poll(app: &AppHandle) {
         let root = crate::settings::dir(app).map(|d| crate::settings::load(&d).repos_root).unwrap_or_default();
         let ids: Vec<String> = sessions::get_sessions(app.state()).into_keys().collect();
         for id in stale(&ids, &p.prs) {
+            // dropping out of the list isn't enough (a Linear-only PR leaves when its issue changes state): only a closed PR loses its checkout
+            let Some((o, r, n)) = parse_session(&id) else { continue };
+            if !closed(&o, &r, n) {
+                continue;
+            }
             sessions::forget(app, &id);
-            if let (Some((o, r, n)), Ok(h)) = (parse_session(&id), home()) {
+            if let Ok(h) = home() {
                 if let Some(c) = find_clone(Path::new(&root), &o, &r) {
                     let _ = remove_review_worktree(&c, &h.join(".murim/reviews").join(&r).join(n.to_string()), n);
                 }
@@ -339,6 +344,13 @@ pub fn remove_review_worktree(clone: &Path, wt: &Path, n: u64) -> Result<(), Str
 }
 
 /// Review sessions whose PR is no longer in the (successfully fetched) open list.
+/// True only when GitHub confirms the PR is merged or closed; any error counts as open.
+fn closed(owner: &str, repo: &str, n: u64) -> bool {
+    github::token()
+        .and_then(|t| github::gql(&t, "query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){state}}}", json!({"o": owner, "r": repo, "n": n})))
+        .is_ok_and(|j| matches!(j["data"]["repository"]["pullRequest"]["state"].as_str(), Some("MERGED" | "CLOSED")))
+}
+
 pub fn stale(session_ids: &[String], open: &[ReviewPr]) -> Vec<String> {
     session_ids.iter().filter(|id| id.starts_with("review:") && !open.iter().any(|p| &p.session_id == *id)).cloned().collect()
 }

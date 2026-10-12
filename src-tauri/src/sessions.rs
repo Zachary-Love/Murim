@@ -103,6 +103,9 @@ pub fn kill_all(app: &AppHandle) {
 // ---- hooks -> status ----
 
 pub fn title_of(s: &SessionInfo) -> String {
+    if let Some(pr) = s.issue_id.strip_prefix("review:") {
+        return format!("Review {pr}"); // "Review owner/repo/12"
+    }
     Path::new(&s.worktree).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| s.issue_id.clone())
 }
 
