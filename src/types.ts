@@ -8,12 +8,10 @@ export type AgentKind = "claude" | "custom";
 // Claude Code's own names for what each mode passes to `claude`.
 export const MODE_LABEL: Record<Mode, string> = { normal: "Ask permissions", allowlist: "Accept edits + dev tools", skip: "Bypass permissions" };
 export type Status = "starting" | "working" | "needsInput" | "idle" | "ended";
-export type Session = { issueId: string; worktree: string; sessionId: string | null; status: Status; questions: unknown; ptyAlive: boolean; permissionMode: Mode; tempering?: boolean; replyMode?: ReplyMode; escalations?: Escalation[]; prFlow?: string; agent?: AgentKind };
+export type Session = { issueId: string; worktree: string; sessionId: string | null; status: Status; questions: unknown; ptyAlive: boolean; permissionMode: Mode; tempering?: boolean; escalations?: Escalation[]; prFlow?: string; agent?: AgentKind };
 export type ReplyMode = "off" | "terse" | "full";
 export type Escalation = { id: string; threadId: string; path: string; comment: string; reason: string };
 export type LogEntry = { issueId: string; at: number | string; message: string };
-export const LABEL: Record<Status, string> = { starting: "Starting", working: "Working", needsInput: "Needs input", idle: "Idle", ended: "Ended" };
-export const STEP: Record<string, string> = { none: "Implementing", reviewing: "Quality pass", awaitingReview: "Draft PR · your review", opened: "Draft PR · your review", ready: "Ready for review" };
 export type Repo = { name: string; path: string };
 export type PrHealth = {
   number: number; url: string; title: string; state: string; isDraft: boolean; ci: string; failingChecks: string[];

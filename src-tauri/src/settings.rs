@@ -31,6 +31,10 @@ pub struct Settings {
     pub repos_root: String,
     pub default_permission_mode: PermissionMode,
     pub caffeine: bool,
+    /// Appended to every task prompt under "Instructions:" when non-empty.
+    pub default_prompt: String,
+    /// How Tempering posts Claude's review-comment replies.
+    pub reply_mode: crate::tempering::ReplyMode,
     /// Linear label -> repo path (remembered matches).
     #[serde(default)]
     pub repo_map: std::collections::HashMap<String, String>,
@@ -90,7 +94,7 @@ mod tests {
         let d = std::env::temp_dir().join(format!("murim-settings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         assert_eq!(load(&d), Settings::default()); // missing
-        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, repo_map: [("bug".to_string(), "/r".to_string())].into() };
+        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into() };
         save(&d, &s).unwrap();
         assert_eq!(load(&d), s);
         std::fs::write(d.join("settings.json"), "{not json").unwrap();

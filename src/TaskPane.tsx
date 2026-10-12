@@ -5,8 +5,8 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import Terminal from "./Terminal";
 import IssueView from "./IssueView";
 import ReviewView from "./ReviewView";
-import { Item, Session, PrHealth, Repo, Mode, LABEL, OVERALL, SEV, STEP, LogEntry, MODE_LABEL, AgentKind } from "./types";
-import { AgentIcon, PrIcon } from "./Icons";
+import { Item, Session, PrHealth, Repo, Mode, OVERALL, SEV, LogEntry, MODE_LABEL, AgentKind, repoName } from "./types";
+import { AgentIcon, PrIcon, FlameIcon, FolderIcon } from "./Icons";
 import logo from "./assets/logo-mark.svg";
 
 const prBadge = (p: PrHealth) => (
@@ -22,7 +22,6 @@ const texts = (q: unknown): string[] => {
 
 export default function TaskPane({ item, session, pr, log, repos, defaultMode, agent }: { item: Item; session?: Session; pr?: PrHealth; log: LogEntry[]; repos: Repo[]; defaultMode: Mode; agent: AgentKind }) {
   const [tab, setTab] = useState<Tab>(session?.status === "needsInput" ? "agent" : (session?.prFlow === "awaitingReview" || session?.prFlow === "opened") ? "review" : "issue");
-  const [mode, setMode] = useState<Mode>(defaultMode);
   const [prompt, setPrompt] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -30,6 +29,7 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode, a
   const [text, setText] = useState("");
   const [term, setTerm] = useState("agent"); // "agent" or a shell id
   const [shells, setShells] = useState<string[]>([]);
+  const [picking, setPicking] = useState(false);
   const id = item.issue.id;
   useEffect(() => {
     const load = () => invoke<string[]>("list_shells", { issueId: id }).then((v) => {
@@ -54,9 +54,13 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode, a
   const alive = !!session?.ptyAlive;
   // a running session keeps the agent it started with; otherwise Settings decides what Start launches
   const custom = (session?.agent ?? agent) === "custom";
-  const start = () => run("start_task", { permissionMode: mode }).then(() => setTab("agent"));
+  const start = () => run("start_task", { permissionMode: defaultMode }).then(() => setTab("agent"));
   const resume = () => run("resume_task", { prompt: prompt || null }).then(() => setTab("agent"));
-  const pickRepo = !item.repo || item.repo.source === "semantic" || item.repo.source === "claude";
+  // unconfirmed repo: Claude starts in the repos folder and names it (MURIM_REPO); custom agents need a repo (or the guess)
+  const guess = !item.repo || item.repo.source === "semantic" || item.repo.source === "claude";
+  const canStart = !!item.repo || !custom;
+  const hasWt = !!session?.worktree; // "" while Claude is still picking the repo
+  const pickRepo = (path: string) => { setPicking(false); invoke("set_issue_repo", { issueId: id, path }).catch((x) => setErr(String(x))); };
   const T = ({ id, children }: { id: Tab; children: ReactNode }) => <button className={tab === id ? "on" : ""} onClick={() => setTab(id)}>{children}</button>;
   const showTerm = (t: string) => { setTerm(t); setTab("agent"); };
   const addShell = () => invoke<string>("open_shell", { issueId: id }).then((t) => { setShells((v) => [...v, t]); showTerm(t); setErr(""); }).catch((e) => setErr(String(e)));
@@ -66,33 +70,20 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode, a
         <nav className="seg">
           <T id="issue">Issue</T>
           <T id="agent">Agent<AgentIcon status={session?.status} /></T>
-          {session && <T id="review">Review{(session.prFlow === "awaitingReview" || session.prFlow === "opened") && <span className="count attn">1</span>}</T>}
+          {hasWt && <T id="review">Review{(session?.prFlow === "awaitingReview" || session?.prFlow === "opened") && <span className="count attn">1</span>}</T>}
           <T id="pr">PR{pr && ` #${pr.number}`}{!!session?.escalations?.length && <span className="count">{session.escalations.length}</span>}</T>
         </nav>
         <div className="topbar-right">
           <button className="chip mono" title="Open in Linear" onClick={() => openUrl(item.issue.url)}>{item.issue.identifier} ↗</button>
-          <h2 className="pane-title" title={item.issue.title}>{item.issue.title}</h2>
-          {session && <span className={`chip status ${session.status}`}><AgentIcon status={session.status} />{LABEL[session.status]}</span>}
-          {session && <span className="chip step">{STEP[session.prFlow ?? "none"] ?? "Implementing"}</span>}
-          {pr && prBadge(pr)}
           {item.resolving && <span className="chip">Matching repo…</span>}
-          {pickRepo && (
-            <select value={item.repo?.path ?? ""} title="Repo" onChange={(e) => invoke("set_issue_repo", { issueId: id, path: e.target.value }).catch((x) => setErr(String(x)))}>
-              {!item.repo && <option value="" disabled>Pick repo…</option>}
-              {repos.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
-            </select>
-          )}
+          <span className="repo-pick">
+            <button className="btn" title={guess && item.repo ? `Likely ${repoName(item)} (guess). Pick the repo` : "Pick the repo"} onClick={() => setPicking(!picking)}><FolderIcon />{guess && !custom ? "auto" : repoName(item) || "Pick repo…"}</button>
+            {picking && <div className="popover">{repos.map((r) => <button key={r.path} className={r.path === item.repo?.path ? "on" : ""} onClick={() => pickRepo(r.path)}>{r.name}</button>)}</div>}
+          </span>
           {alive ? (
             <button className="btn danger" onClick={() => run("stop_task")}>■ Stop agent</button>
           ) : (
-            <>
-              {!custom && (
-                <select value={mode} title="Claude Code permission mode" className={mode === "skip" ? "warn" : ""} onChange={(e) => setMode(e.target.value as Mode)}>
-                  {(Object.keys(MODE_LABEL) as Mode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
-                </select>
-              )}
-              <button className={`btn ${session ? "" : "primary"}`} disabled={!item.repo} title={item.repo ? (session ? "Start a fresh agent session in this worktree" : "") : "Pick a repo first"} onClick={start}>{session ? "New session" : "Start agent"}</button>
-            </>
+            <button className={`btn ${session ? "" : "primary"}`} disabled={!canStart} title={!canStart ? "Pick a repo first" : guess && !custom ? "Claude confirms the repo from your repos folder, then starts in its worktree" : session ? "Start a fresh agent session in this worktree" : ""} onClick={start}>{session ? "New session" : "Start agent"}</button>
           )}
           {session && !alive && (
             <>
@@ -101,14 +92,7 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode, a
             </>
           )}
           {pr && session && !custom && (
-            <>
-              <button className={`btn toggle ${session.tempering ? "on" : ""}`} title="Babysit the PR: rerun CI, fix failures, answer reviews" onClick={() => run("set_tempering", { on: !session.tempering })}>🔥 Tempering {session.tempering ? "on" : "off"}</button>
-              <select value={session.replyMode ?? "terse"} title="How the agent replies to review comments" onChange={(e) => run("set_reply_mode", { mode: e.target.value })}>
-                <option value="off">Replies: off</option>
-                <option value="terse">Replies: terse</option>
-                <option value="full">Replies: full</option>
-              </select>
-            </>
+            <button className={`btn toggle ${session.tempering ? "on" : ""}`} title="Babysit the PR: rerun CI, fix failures, answer reviews (reply style is in Settings)" onClick={() => run("set_tempering", { on: !session.tempering })}><FlameIcon /> Tempering {session.tempering ? "on" : "off"}</button>
           )}
         </div>
       </header>
@@ -120,7 +104,7 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode, a
             <button className="x" title="Close terminal" onClick={() => invoke("close_shell", { id: t })}>×</button>
           </span>
         ))}
-        <button className="tab add" title={session ? "New terminal in this task's worktree" : "Start the agent first: the task has no worktree yet"} disabled={!session} onClick={addShell}>+</button>
+        <button className="tab add" title={hasWt ? "New terminal in this task's worktree" : "Start the agent first: the task has no worktree yet"} disabled={!hasWt} onClick={addShell}>+</button>
       </div>
       {err && <div className="banner">{err}</div>}
       {tab === "issue" && <IssueView issueId={id} />}
@@ -134,14 +118,14 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode, a
               {qs.map((q, n) => <div key={n}>{q}</div>)}
             </div>
           )}
-          {alive ? <Terminal issueId={id} /> : (
+          {alive ? <Terminal key={session?.worktree} issueId={id} /> : ( /* remount when the repo pick hands off to the worktree session */
             // ponytail: no PTY means nothing to type into; show how to launch instead of a dead xterm.
             <div className="empty-state">
               <img className="logo-lg" src={logo} alt="" />
               <p>{session ? "The agent isn't running for this task." : "The agent hasn't been started for this task."}</p>
-              {!item.repo ? <p className="muted">Pick a repo first.</p> : session
+              {!canStart ? <p className="muted">Pick a repo first.</p> : session
                 ? <button className={`btn ${session.prFlow === "awaitingReview" ? "" : "primary"}`} onClick={resume}>↻ Resume agent</button>
-                : <button className="btn primary" onClick={start}>Start agent{custom ? "" : ` · ${MODE_LABEL[mode]}`}</button>}
+                : <button className="btn primary" onClick={start}>Start agent{custom ? "" : ` · ${MODE_LABEL[defaultMode]}`}</button>}
             </div>
           )}
         </>
@@ -186,7 +170,7 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode, a
           ))}
           {pr && session && log.length > 0 && (
             <section className="card">
-              <div className="q-head">🔥 Tempering activity</div>
+              <div className="q-head"><FlameIcon /> Tempering activity</div>
               <ul className="tlog">{log.map((l, n) => <li key={n}><span className="meta">{ago(l.at)}</span> {l.message}</li>)}</ul>
             </section>
           )}

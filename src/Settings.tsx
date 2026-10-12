@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { MODE_LABEL, AgentKind } from "./types";
+import { MODE_LABEL, AgentKind, ReplyMode } from "./types";
 
-type S = { agent: AgentKind; agent_command: string; repos_root: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean };
+type S = { agent: AgentKind; agent_command: string; repos_root: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; reply_mode: ReplyMode };
 
 export default function Settings() {
   const [s, setS] = useState<S | null>(null);
@@ -60,6 +60,9 @@ export default function Settings() {
             the automatic quality pass and draft PR, or Tempering — those rely on Claude Code's hooks.</p>
         </>
       )}
+      <label>Default prompt
+        <textarea value={s.default_prompt} placeholder="Appended to every task prompt, e.g. run the tests before finishing" onChange={(e) => setS({ ...s, default_prompt: e.target.value })} />
+      </label>
       {s.agent === "claude" && <>
       <label>Default permission mode
         <select value={s.default_permission_mode}
@@ -70,6 +73,13 @@ export default function Settings() {
       {s.default_permission_mode === "skip" && (
         <p className="warn">Bypass permissions runs Claude Code with --dangerously-skip-permissions: no prompts for any tool.</p>
       )}
+      <label>Review replies (Tempering)
+        <select value={s.reply_mode} onChange={(e) => setS({ ...s, reply_mode: e.target.value as ReplyMode })}>
+          <option value="off">Off</option>
+          <option value="terse">Terse</option>
+          <option value="full">Full</option>
+        </select>
+      </label>
       </>}
       <label>Linear API key {hasKey && <span className="chip green">saved</span>}
         <input type="password" value={key} placeholder={hasKey ? "enter to replace" : ""}

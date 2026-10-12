@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::Read;
+use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
@@ -38,8 +39,20 @@ pub enum StopOutcome {
 /// Tempering-invoked turns are exempt (no marker needed). DONE only triggers the quality pass once.
 /// Marker counts only as the message's last non-empty line (ignoring markdown `*`/`` ` ``), so prose that
 /// merely mentions it ("not done, so no MURIM_DONE yet") doesn't trigger anything.
+fn last_line(msg: &str) -> Option<&str> {
+    msg.lines().rev().map(|l| l.trim().trim_matches(|c| c == '*' || c == '`').trim()).find(|l| !l.is_empty())
+}
+
 fn ends_with_marker(msg: &str, marker: &str) -> bool {
-    msg.lines().rev().map(|l| l.trim().trim_matches(|c| c == '*' || c == '`').trim()).find(|l| !l.is_empty()) == Some(marker)
+    last_line(msg) == Some(marker)
+}
+
+/// Repo-pick turn: last line `MURIM_REPO: <name>` → that repo dir under `root`. Trust boundary (the name comes from
+/// an agent that read issue text): a bare directory name only, no paths, and it must be a git repo there.
+pub fn repo_marker(msg: &str, root: &Path) -> Option<PathBuf> {
+    let name = last_line(msg)?.strip_prefix("MURIM_REPO:")?.trim().trim_matches('`');
+    let bare = !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\']);
+    bare.then(|| root.join(name)).filter(|p| p.join(".git").exists())
 }
 
 pub fn on_stop(flow: PrFlow, last_msg: &str, has_pr: bool, tempering_turn: bool) -> StopOutcome {
@@ -152,5 +165,18 @@ mod tests {
         assert!(ends_with_marker("All done.\n\n**MURIM_DONE**\n", "MURIM_DONE"));
         assert!(!ends_with_marker("Not finished, so no MURIM_DONE yet. Which API should I use?", "MURIM_DONE"));
         assert_eq!(on_stop(PrFlow::None, "I'll print MURIM_DONE when finished. Question?", false, false), StopOutcome::NeedsInput);
+    }
+
+    #[test]
+    fn repo_marker_validates_name() {
+        let root = std::env::temp_dir().join(format!("murim-pick-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("app/.git")).unwrap();
+        std::fs::create_dir_all(root.join("x/.git")).unwrap();
+        assert_eq!(repo_marker("It's the app.\n**MURIM_REPO: app**", &root), Some(root.join("app")));
+        assert_eq!(repo_marker("MURIM_REPO: `app`", &root), Some(root.join("app")));
+        for bad in ["MURIM_REPO: ../x", "MURIM_REPO: a/b", "MURIM_REPO: nope", "MURIM_REPO: ..", "MURIM_REPO:", "MURIM_REPO: app\nWhich one?", &format!("MURIM_REPO: {}", root.join("app").display())] {
+            assert_eq!(repo_marker(bad, &root), None, "{bad}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

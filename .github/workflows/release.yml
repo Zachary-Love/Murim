@@ -12,6 +12,8 @@ permissions:
 jobs:
   macos:
     runs-on: macos-latest
+    # Signing key lives in this environment: v* tags only, and each run waits for the owner's approval.
+    environment: release
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -29,13 +31,16 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the .app.tar.gz updater bundle; tauri-action then uploads it, its .sig and latest.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Murim ${{ github.ref_name }}
           releaseDraft: false
           prerelease: false
           # ponytail: Apple Silicon only; ort (fastembed) has no prebuilt x86_64-apple-darwin binaries. Intel needs ort built from source.
-          args: --bundles dmg
+          args: --bundles app,dmg
           releaseBody: |
             Download the `.dmg` below, open it, and drag Murim into Applications. Requires an Apple Silicon Mac (M1 or newer).
 

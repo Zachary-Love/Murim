@@ -1,6 +1,7 @@
 use crate::hooks::{self, Hooks, PrFlow, Status, StopOutcome};
+use crate::repo_match::Source;
 use crate::settings::{self, AgentKind, PermissionMode};
-use crate::tempering::{Escalation, Memory, ReplyMode};
+use crate::tempering::{Escalation, Memory};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -28,8 +29,6 @@ pub struct SessionInfo {
     pub permission_mode: PermissionMode,
     #[serde(default)]
     pub tempering: bool,
-    #[serde(default)]
-    pub reply_mode: ReplyMode,
     #[serde(default)]
     pub escalations: Vec<Escalation>,
     #[serde(default)]
@@ -117,6 +116,13 @@ fn quality_prompt(ident: &str, base: &str) -> String {
     format!("Quality pass. Run /ponytail:ponytail-review on this branch's diff vs {base} (if that skill is not available, say so and do an equivalent self-review for bugs, needless complexity and dead code), and apply its fixes. Run the project's tests and linters and fix failures. Commit all changes (no AI attribution or Co-Authored-By lines), push the branch, then open a draft PR with `gh pr create --draft` with a clear title and description; the body must include `Fixes {ident}`. Do NOT mark it ready: the user reviews it first. End your final message with the line MURIM_PR_OPENED.")
 }
 
+/// Claude runs in repos_root (worktree "") until it names the repo; see hooks::repo_marker.
+fn pick_prompt(issue: &str, repos: &[crate::repo_match::Repo], guess: Option<&crate::repo_match::RepoMatch>) -> String {
+    let names: Vec<&str> = repos.iter().map(|r| r.name.as_str()).collect();
+    let guess = guess.and_then(|g| Path::new(&g.path).file_name()).map(|n| format!("\nLikely repo: {} (guess)", n.to_string_lossy())).unwrap_or_default();
+    format!("Before work starts on this issue, decide which repo it belongs in. You are in the folder that holds all repos. Do NOT edit, create or commit anything; only read (READMEs, code) as needed. If it is unclear, ask me. When you know, end your final message with the line `MURIM_REPO: <repo-name>` (one of the repos below); Murim then opens the task in that repo.\n\nRepos: {}{guess}\n\n{issue}", names.join(", "))
+}
+
 /// "Request changes" during review: fix, push, keep the PR description accurate.
 pub fn changes_prompt(feedback: &str) -> String {
     format!("Review feedback on your PR: {feedback}\n\nApply it, commit (no AI attribution), and push. If the change affects the PR title or description, update them with `gh pr edit`. Keep the PR a draft. End your final message with the line MURIM_PR_OPENED.")
@@ -125,15 +131,25 @@ pub fn changes_prompt(feedback: &str) -> String {
 pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
     let stop = ev["hook_event_name"] == "Stop";
     let has_pr = stop && crate::github::get_prs(app.state()).prs.contains_key(task);
-    let (mut quality, mut ready) = (None, None);
+    let (mut quality, mut ready, mut picked) = (None, None, None);
+    let root = settings::dir(app).map(|d| settings::load(&d).repos_root).unwrap_or_default();
     let note = update(app, |g| {
         let s = g.map.get_mut(task)?;
+        if ev["hook_event_name"] == "SessionEnd" && ev["session_id"].as_str() != s.session_id.as_deref() {
+            return None; // a replaced Claude (e.g. the repo-pick session) exiting late; the PTY reader handles our own exit
+        }
         if let Some(id) = ev["session_id"].as_str() {
             s.session_id = Some(id.to_string());
         }
         let (mut st, q) = hooks::next_status(s.status, ev);
         let was = s.status;
-        if stop {
+        if stop && s.worktree.is_empty() {
+            // repo-pick session in repos_root: a valid MURIM_REPO line moves the task into its worktree, else ask the user
+            picked = hooks::repo_marker(ev["last_assistant_message"].as_str().unwrap_or_default(), Path::new(&root)).map(|p| (p, s.permission_mode));
+            if picked.is_none() {
+                st = Status::NeedsInput;
+            }
+        } else if stop {
             let tt = std::mem::take(&mut s.tempering_turn);
             match hooks::on_stop(s.pr_flow, ev["last_assistant_message"].as_str().unwrap_or_default(), has_pr, tt) {
                 StopOutcome::Idle => {}
@@ -170,6 +186,20 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
             if let Err(e) = resume_task(a.clone(), t.clone(), Some(quality_prompt(&ident, &base))) {
                 with_session(&a, &t, |s| s.pr_flow = PrFlow::None);
                 crate::tempering::log(&a, &t, format!("Could not start quality pass: {e}"));
+            }
+        });
+    }
+    if let Some((repo, mode)) = picked {
+        let (a, t) = (app.clone(), task.to_string());
+        std::thread::spawn(move || {
+            // take the PTY out first so its reader thread doesn't mark the new session ended
+            if let Some(mut p) = update(&a, |g| g.ptys.remove(&t)) {
+                let _ = p.child.kill();
+            }
+            let r = crate::inbox::set_issue_repo(a.clone(), a.state(), t.clone(), repo.to_string_lossy().into()).and_then(|_| start_task(a.clone(), t.clone(), mode));
+            if let Err(e) = r {
+                with_session(&a, &t, |s| s.status = Status::NeedsInput);
+                notify(&a, t, format!("Could not start in the picked repo: {e}"));
             }
         });
     }
@@ -217,6 +247,17 @@ fn parse_shell_env(out: &str) -> (Vec<(String, String)>, Option<String>) {
 /// Vars an editor's terminal injects (VS Code's GIT_ASKPASS pops a VS Code auth dialog); Murim must not inherit them.
 pub fn editor_var(k: &str) -> bool {
     matches!(k, "GIT_ASKPASS" | "SSH_ASKPASS") || k.starts_with("VSCODE_") || k.starts_with("TERM_PROGRAM")
+}
+
+/// What a real terminal sets for its children. Without COLORTERM, chalk-style color detection (Claude Code, etc.) drops
+/// truecolor to the 256-color cube; a GUI-launched app has no LANG, so zsh/CLIs fall back to ASCII/C locale.
+fn term_env(c: &mut CommandBuilder) {
+    c.env("TERM", "xterm-256color");
+    c.env("COLORTERM", "truecolor");
+    c.env("TERM_PROGRAM", "Murim"); // set on the child only; editor_var still strips the inherited one
+    if ["LANG", "LC_ALL", "LC_CTYPE"].iter().all(|k| c.get_env(k).is_none()) {
+        c.env("LANG", "en_US.UTF-8");
+    }
 }
 
 // ---- worktree + hook settings ----
@@ -335,6 +376,10 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
         let claude = claude.clone().or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.local/bin/claude")).filter(|p| Path::new(p).exists())).ok_or("claude not found on PATH (login shell)")?;
         let mut c = CommandBuilder::new(claude);
         c.args(head);
+        if wt.is_empty() {
+            // repo-pick session: hooks via --settings (nothing written into repos_root), no file edits
+            c.args(["--settings", &merge_hooks(json!({})).to_string(), "--disallowedTools", "Edit,Write,NotebookEdit"]);
+        }
         c.args(flags(mode));
         c
     };
@@ -348,8 +393,8 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
             c.env(k, v);
         }
     }
-    c.cwd(&wt);
-    c.env("TERM", "xterm-256color");
+    c.cwd(if wt.is_empty() { settings::load(&settings::dir(app)?).repos_root } else { wt });
+    term_env(&mut c);
     c.env("MURIM_PORT", hk.port.to_string());
     c.env("MURIM_TOKEN", &hk.token);
     c.env("MURIM_TASK", issue_id);
@@ -432,7 +477,7 @@ fn shell_prefix(issue_id: &str) -> String {
 
 #[tauri::command]
 pub fn open_shell(app: AppHandle, issue_id: String) -> Result<String, String> {
-    let wt = with_session(&app, &issue_id, |s| s.worktree.clone()).ok_or("Start Claude first: the task has no worktree yet")?;
+    let wt = with_session(&app, &issue_id, |s| s.worktree.clone()).filter(|w| !w.is_empty()).ok_or("Start Claude first: the task has no worktree yet")?;
     let pair = native_pty_system().openpty(PtySize { rows: 40, cols: 120, pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string())?;
     let mut c = CommandBuilder::new(std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()));
     c.arg("-l");
@@ -440,7 +485,7 @@ pub fn open_shell(app: AppHandle, issue_id: String) -> Result<String, String> {
         c.env(k, v);
     }
     c.cwd(&wt);
-    c.env("TERM", "xterm-256color");
+    term_env(&mut c);
     let child = pair.slave.spawn_command(c).map_err(|e| e.to_string())?;
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
@@ -507,27 +552,37 @@ fn write_pty(app: &AppHandle, id: &str, data: &[u8]) -> Result<(), String> {
 #[tauri::command]
 pub fn start_task(app: AppHandle, issue_id: String, permission_mode: PermissionMode) -> Result<(), String> {
     let it = crate::inbox::find(&app, &issue_id).ok_or("unknown issue")?;
-    let repo = it.repo.ok_or("no repo for this issue")?;
     let i = &it.issue;
-    let branch = if i.branch_name.is_empty() { i.identifier.to_lowercase() } else { i.branch_name.clone() };
-    let repo = Path::new(&repo.path);
-    let home = PathBuf::from(std::env::var("HOME").map_err(|e| e.to_string())?);
     let cfg = settings::load(&settings::dir(&app)?);
     let custom = cfg.agent == AgentKind::Custom;
     if custom && cfg.agent_command.trim().is_empty() {
         return Err("Set the agent command in Settings".into());
     }
-    let wt = ensure_worktree(&home, repo, &i.identifier, &branch)?;
-    write_hooks(&wt)?;
-    exclude_settings(repo)?;
-    // the MURIM_DONE marker drives Claude's hook-based flow; custom agents just get the issue
-    let prompt = format!("Work on Linear issue {}: {}\n{}\n\n{}{}", i.identifier, i.title, i.url, i.description, if custom { "" } else { DONE_SUFFIX });
+    let issue = format!("Linear issue {}: {}\n{}\n\n{}", i.identifier, i.title, i.url, i.description);
+    // semantic/claude matches are guesses: Claude confirms the repo from repos_root first (custom agents have no hooks to report it)
+    let guess = it.repo.as_ref().filter(|r| matches!(r.source, Source::Semantic | Source::Claude));
+    let (wt, prompt) = match &it.repo {
+        Some(r) if custom || guess.is_none() => {
+            let branch = if i.branch_name.is_empty() { i.identifier.to_lowercase() } else { i.branch_name.clone() };
+            let repo = Path::new(&r.path);
+            let wt = ensure_worktree(&PathBuf::from(std::env::var("HOME").map_err(|e| e.to_string())?), repo, &i.identifier, &branch)?;
+            write_hooks(&wt)?;
+            exclude_settings(repo)?;
+            // the MURIM_DONE marker drives Claude's hook-based flow; custom agents just get the issue
+            let extra = cfg.default_prompt.trim();
+            let extra = if extra.is_empty() { String::new() } else { format!("\n\nInstructions:\n{extra}") };
+            (wt.to_string_lossy().into_owned(), format!("Work on {issue}{extra}{}", if custom { "" } else { DONE_SUFFIX }))
+        }
+        _ if custom => return Err("Pick a repo first".into()),
+        _ if cfg.repos_root.is_empty() => return Err("Choose your repos folder in Settings".into()),
+        _ => (String::new(), pick_prompt(&issue, &crate::repo_match::list_repos(Path::new(&cfg.repos_root)), guess)),
+    };
     update(&app, |g| {
         if g.ptys.contains_key(&issue_id) {
             return Err("already running".to_string());
         }
         let old = g.map.get(&issue_id).cloned();
-        g.map.insert(issue_id.clone(), SessionInfo { issue_id: issue_id.clone(), worktree: wt.to_string_lossy().into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode, tempering: !custom && old.as_ref().is_some_and(|o| o.tempering), reply_mode: old.as_ref().map(|o| o.reply_mode).unwrap_or_default(), escalations: vec![], pr_flow: old.as_ref().map(|o| o.pr_flow).unwrap_or_default(), agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), tempering_turn: false, memory: old.map(|o| o.memory).unwrap_or_default() });
+        g.map.insert(issue_id.clone(), SessionInfo { issue_id: issue_id.clone(), worktree: wt, session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode, tempering: !custom && old.as_ref().is_some_and(|o| o.tempering), escalations: vec![], pr_flow: old.as_ref().map(|o| o.pr_flow).unwrap_or_default(), agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), tempering_turn: false, memory: old.map(|o| o.memory).unwrap_or_default() });
         Ok(())
     })?;
     spawn(&app, &issue_id, vec![prompt])
@@ -676,6 +731,12 @@ mod tests {
             assert!(p.contains(k), "{k}");
         }
         assert!(p.ends_with("line MURIM_PR_OPENED.") && changes_prompt("x").ends_with("line MURIM_PR_OPENED."));
+        let repos = [crate::repo_match::Repo { name: "alpha".into(), path: "/r/alpha".into() }, crate::repo_match::Repo { name: "beta".into(), path: "/r/beta".into() }];
+        let g = crate::repo_match::RepoMatch { path: "/r/beta".into(), source: Source::Semantic };
+        let p = pick_prompt("Linear issue E-1", &repos, Some(&g));
+        for k in ["MURIM_REPO: <repo-name>", "Repos: alpha, beta", "Likely repo: beta (guess)", "Do NOT edit", "Linear issue E-1"] {
+            assert!(p.contains(k), "{k}");
+        }
     }
 
     #[test]

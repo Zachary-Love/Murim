@@ -5,9 +5,9 @@
   --text: #fafafa; --text-2: #d4d4d4; --muted: #a3a3a3; --dim: #737373;
   --accent: #3b82f6; --brand: #f43f5e; --brand-dim: #f43f5e1f;
   --red: #ef6b6b; --amber: #f0b429; --blue: #5aa9e6; --green: #4ade80;
-  --mono: "SF Mono", Menlo, ui-monospace, monospace;
+  --mono: "JetBrains Mono Variable", "SF Mono", Menlo, ui-monospace, monospace;
   color-scheme: dark;
-  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font: 13px/1.45 var(--mono);
   background: var(--bg);
   color: var(--text-2);
 }
@@ -60,9 +60,6 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .chip.amber { color: var(--amber); border-color: #f0b42966; }
 .chip.blue { color: var(--blue); border-color: #5aa9e666; }
 .chip.green { color: var(--green); border-color: #4ade8066; }
-.chip.status.needsInput { color: var(--brand); border-color: #f43f5e99; background: var(--brand-dim); }
-.chip.status.working, .chip.status.starting { color: var(--blue); }
-.chip.step { color: #b39ddb; }
 .count { font-size: 10px; padding: 0 5px; border-radius: 999px; background: var(--line-hi); color: var(--text-2); }
 .group { display: inline-flex; align-items: center; gap: 6px; }
 .field { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--dim); }
@@ -100,7 +97,6 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 
 /* ---- task pane ---- */
 .pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
-.pane-title { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* segmented tabs */
 .seg { display: inline-flex; align-self: flex-start; gap: 2px; margin: 10px 16px; padding: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
@@ -184,8 +180,11 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
 .topbar .seg { margin: 0; }
 .topbar-right { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
-.topbar-right .pane-title { flex: 0 1 auto; max-width: 320px; font-size: 13px; }
 .topbar-right input { width: 180px; }
+.repo-pick { position: relative; }
+.repo-pick .popover { position: absolute; right: 0; top: calc(100% + 4px); z-index: 10; min-width: 180px; max-height: 320px; overflow: auto; display: flex; flex-direction: column; padding: 4px; background: var(--raised); border: 1px solid var(--line-hi); border-radius: 7px; }
+.repo-pick .popover button { background: none; border: 0; cursor: pointer; text-align: left; padding: 6px 8px; border-radius: 5px; font-size: 12px; color: var(--text-2); }
+.repo-pick .popover button:hover, .repo-pick .popover button.on { background: var(--hover); color: var(--text); }
 /* Orca-style tab strip */
 .tabbar { display: flex; align-items: stretch; height: 34px; padding: 0 8px; background: var(--surface); border-bottom: 1px solid var(--line); overflow-x: auto; }
 .tabbar .tab { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; font-size: 12px; color: var(--muted); background: none; border: 0; border-right: 1px solid var(--line); border-top: 2px solid transparent; cursor: pointer; white-space: nowrap; }

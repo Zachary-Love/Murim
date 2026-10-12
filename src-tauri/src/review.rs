@@ -24,7 +24,7 @@ pub struct Review {
 }
 
 fn worktree(app: &AppHandle, id: &str) -> Result<String, String> {
-    with_session(app, id, |s| s.worktree.clone()).ok_or_else(|| "no Claude session for this task".into())
+    with_session(app, id, |s| s.worktree.clone()).filter(|w| !w.is_empty()).ok_or_else(|| "no Claude session for this task".into())
 }
 
 fn dirty(wt: &Path) -> Result<Vec<String>, String> {

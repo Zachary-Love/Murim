@@ -279,7 +279,8 @@ fn post(app: &AppHandle, id: &str, thread_id: &str, body: &str, resolve: bool) -
 pub fn consume(app: &AppHandle, id: &str) {
     static LOCK: Mutex<()> = Mutex::new(());
     let _g = LOCK.lock().unwrap();
-    let Some((wt, mode)) = sessions::with_session(app, id, |s| (s.worktree.clone(), s.reply_mode)) else { return };
+    let Some(wt) = sessions::with_session(app, id, |s| s.worktree.clone()).filter(|w| !w.is_empty()) else { return }; // "" = repo-pick session
+    let mode = crate::settings::dir(app).map(|d| crate::settings::load(&d).reply_mode).unwrap_or_default();
     let f = Path::new(&wt).join(".murim/replies.jsonl");
     let Ok(text) = std::fs::read_to_string(&f) else { return };
     let _ = std::fs::write(&f, "");
@@ -384,11 +385,6 @@ pub fn set_tempering(app: AppHandle, issue_id: String, on: bool) -> Result<(), S
         let _ = sessions::exclude_settings(Path::new(&wt)); // sessions created before .murim/ was excluded
     }
     Ok(())
-}
-
-#[tauri::command]
-pub fn set_reply_mode(app: AppHandle, issue_id: String, mode: ReplyMode) -> Result<(), String> {
-    sessions::with_session(&app, &issue_id, |s| s.reply_mode = mode).ok_or_else(|| "unknown session".into())
 }
 
 #[derive(Deserialize, Clone, Copy, Debug)]

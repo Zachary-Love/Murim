@@ -38,7 +38,10 @@ pnpm tauri build        # release .app / .dmg
 ```
 
 Open Settings (gear, bottom left), set the repos folder, paste your Linear key, save.
-Issues are matched to repos by a label equal to the repo name; you can always pick the repo by hand.
+Issues are matched to repos by a label equal to the repo name (or a label you mapped before). Otherwise, with Claude
+Code, **Start agent** opens Claude in the repos folder with the issue, the repo list and Murim's best guess; it only
+reads, names the repo with a final `MURIM_REPO: <name>` line, and Murim moves the task into that repo's worktree.
+The folder button in the task bar picks the repo by hand at any time. Custom agents need a repo (or the guess) first.
 
 ## Agents
 
@@ -68,13 +71,18 @@ See [plan.md](plan.md) for the design.
   **Accept edits + dev tools** modes; **Bypass permissions** (`--dangerously-skip-permissions`) lets Claude run
   any command without asking, so use it only on repos and PRs where you trust every contributor.
 - **Replies as you:** with Tempering replies on, Claude's replies to review comments are posted under your
-  GitHub account. Set replies to Off to disable.
+  GitHub account. Set Review replies to Off in Settings to disable.
 
 ## Releasing
 
 Bump the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, commit, then
 push a tag: `git tag v0.2.0 && git push origin v0.2.0`. GitHub Actions builds the Apple Silicon `.dmg` and publishes
 the release.
+
+Releases are signed for the in-app updater, so the repo needs the `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. The private key lives at `~/.tauri/murim.key` (public key in
+`tauri.conf.json`). Back it up: if it's lost, existing installs can never update again. 0.1.0 shipped without the
+updater, so 0.1.0 users have to install the next release manually once.
 
 ## License
 

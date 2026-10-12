@@ -3,8 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Settings from "./Settings";
 import Caffeine from "./Caffeine";
+import Updater from "./Updater";
 import { Item, Repo, Session, Mode, AgentKind, LogEntry, PrMap, SEV, OVERALL, sortItems, stage } from "./types";
-import { StateIcon, AgentIcon, PrIcon, GearIcon } from "./Icons";
+import { StateIcon, AgentIcon, PrIcon, GearIcon, FlameIcon } from "./Icons";
 import TaskPane from "./TaskPane";
 import logo from "./assets/logo-mark.svg";
 
@@ -64,7 +65,7 @@ export default function App() {
                 <span className="ident">{i.issue.identifier}</span>
                 <span className="t">{i.issue.title}</span>
                 <AgentIcon status={se?.status} />
-                {se?.tempering && <span title="Tempering">🔥</span>}
+                {se?.tempering && <span title="Tempering"><FlameIcon /></span>}
                 {pr && <PrIcon color={SEV[pr.overall] ?? "grey"} n={se?.escalations?.length} title={`${OVERALL[pr.overall] ?? pr.overall} #${pr.number}`} />}
                 </button>
               </li>
@@ -73,6 +74,7 @@ export default function App() {
           {!p.items.length && <li className="empty">No tasks in your active cycle</li>}
         </ul>
         <footer className="sidebar-footer">
+          <Updater />
           <Caffeine />
           <button className={`btn icon ${showSettings ? "on" : ""}`} title="Settings" onClick={() => setShowSettings(!showSettings)}><GearIcon /></button>
         </footer>

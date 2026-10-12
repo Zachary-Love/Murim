@@ -16,5 +16,11 @@
       "devCsp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' ws: http://localhost:1420 ipc: http://ipc.localhost; img-src 'self' data: https:"
     }
   },
-  "bundle": { "active": true, "targets": "all", "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico", "icons/icon.png"] }
+  "bundle": { "active": true, "createUpdaterArtifacts": true, "targets": "all", "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico", "icons/icon.png"] },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUyQUNDMDk2MEZBNzg0N0MKUldSOGhLY1Bsc0NzNHBaT0FPTmN4eHErYmVMbnFzaVViczFGdzlNdXZrVk5XYjJHaEhVSVgzWkUK",
+      "endpoints": ["https://github.com/Zachary-Love/Murim/releases/latest/download/latest.json"]
+    }
+  }
 }
