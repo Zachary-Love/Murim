@@ -165,3 +165,20 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 @keyframes pulse { 50% { opacity: .45; } }
 .stage.todo { color: #e5e5e5; } .stage.progress { color: var(--amber); } .stage.needsReview { color: #a78bfa; }
 .stage.codeReview { color: var(--green); } .stage.done { color: var(--blue); }
+
+/* pre-PR review */
+.review { display: flex; flex-direction: column; gap: 10px; }
+.review .pr-title { height: 32px; font-size: 14px; font-weight: 600; color: var(--text); }
+.review .pr-body { min-height: 120px; font: 12px/1.5 var(--mono); }
+.review .reply { flex-direction: row; align-items: flex-end; }
+.review .reply textarea { min-height: 36px; }
+.count.attn { background: var(--claude); color: #1a0f0a; }
+.file { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.file summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; font-size: 12px; color: var(--text); background: var(--raised); }
+.file summary .mono { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.diff { margin: 0; overflow-x: auto; font: 12px/1.5 var(--mono); }
+.diff > div { padding: 0 12px; white-space: pre; min-width: max-content; }
+.diff .add { background: #4ade801a; color: #a7f3c0; }
+.diff .del { background: #ef6b6b1a; color: #f7b4b4; }
+.diff .hunk { color: var(--blue); background: #5aa9e60f; }
+.review > * { flex-shrink: 0; }

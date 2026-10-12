@@ -19,6 +19,8 @@ pub enum PrFlow {
     #[default]
     None,
     Reviewing,
+    /// Claude committed; waiting for the user to review the diff and press Create PR.
+    AwaitingReview,
     Opened,
     Ready,
 }
@@ -28,6 +30,7 @@ pub enum StopOutcome {
     Idle,
     NeedsInput,
     Quality,
+    AwaitingReview,
     Opened,
 }
 
@@ -44,6 +47,10 @@ pub fn on_stop(flow: PrFlow, last_msg: &str, has_pr: bool, tempering_turn: bool)
         StopOutcome::Idle
     } else if ends_with_marker(last_msg, "MURIM_PR_OPENED") {
         if flow == PrFlow::Opened { StopOutcome::Idle } else { StopOutcome::Opened }
+    } else if ends_with_marker(last_msg, "MURIM_READY") {
+        if has_pr { StopOutcome::Idle } else { StopOutcome::AwaitingReview }
+    } else if flow == PrFlow::AwaitingReview {
+        StopOutcome::Idle // follow-up chat during review; the Review tab stays up
     } else if ends_with_marker(last_msg, "MURIM_DONE") {
         if flow == PrFlow::None && !has_pr { StopOutcome::Quality } else { StopOutcome::Idle }
     } else if has_pr {
@@ -124,6 +131,10 @@ mod tests {
         assert_eq!(on_stop(F::Reviewing, "MURIM_DONE", false, false), O::Idle); // no re-prompt
         assert_eq!(on_stop(F::Opened, "MURIM_DONE", true, false), O::Idle);
         assert_eq!(on_stop(F::Opened, "MURIM_PR_OPENED", true, false), O::Idle);
+        assert_eq!(on_stop(F::Reviewing, "x\nMURIM_READY", false, false), O::AwaitingReview);
+        assert_eq!(on_stop(F::AwaitingReview, "x\nMURIM_READY", false, false), O::AwaitingReview); // after requested changes
+        assert_eq!(on_stop(F::AwaitingReview, "Which name do you prefer?", false, false), O::Idle);
+        assert_eq!(on_stop(F::Opened, "MURIM_READY", true, false), O::Idle);
     }
 
     #[test]

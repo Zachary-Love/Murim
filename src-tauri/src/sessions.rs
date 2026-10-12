@@ -109,13 +109,18 @@ pub fn notify(app: &AppHandle, title: String, body: String) {
 const DONE_SUFFIX: &str = "\n\nWhen the issue is fully implemented, end your final message with the line MURIM_DONE.";
 
 fn quality_prompt(ident: &str, base: &str) -> String {
-    format!("Quality pass. Run /ponytail:ponytail-review on this branch's diff vs {base} (if that skill is not available, say so and do an equivalent self-review for bugs, needless complexity and dead code), and apply its fixes. Run the project's tests and linters and fix failures. Commit (no AI attribution or Co-Authored-By lines), push the branch, then open a draft PR with `gh pr create --draft` with a clear title and description; the body must include `Fixes {ident}`. End your final message with the line MURIM_PR_OPENED.")
+    format!("Quality pass. Run /ponytail:ponytail-review on this branch's diff vs {base} (if that skill is not available, say so and do an equivalent self-review for bugs, needless complexity and dead code), and apply its fixes. Run the project's tests and linters and fix failures. Commit all changes (no AI attribution or Co-Authored-By lines). Do NOT push and do NOT open a PR: the user reviews the diff first. {}", pr_draft(ident))
+}
+
+/// Shared by the quality pass and "request changes" turns during review.
+pub fn pr_draft(ident: &str) -> String {
+    format!("Write the proposed PR to .murim/pr.md: the PR title on the first line, a blank line, then a clear description that includes `Fixes {ident}`. End your final message with the line MURIM_READY.")
 }
 
 pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
     let stop = ev["hook_event_name"] == "Stop";
     let has_pr = stop && crate::github::get_prs(app.state()).prs.contains_key(task);
-    let mut quality = None;
+    let (mut quality, mut ready) = (None, None);
     let note = update(app, |g| {
         let s = g.map.get_mut(task)?;
         if let Some(id) = ev["session_id"].as_str() {
@@ -130,6 +135,10 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
                 StopOutcome::NeedsInput => st = Status::NeedsInput,
                 StopOutcome::Quality => (s.pr_flow, quality) = (PrFlow::Reviewing, Some((s.worktree.clone(), title_of(s)))),
                 StopOutcome::Opened => s.pr_flow = PrFlow::Opened,
+                StopOutcome::AwaitingReview => {
+                    s.pr_flow = PrFlow::AwaitingReview;
+                    ready = Some(title_of(s));
+                }
             }
         }
         s.status = st;
@@ -145,6 +154,9 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
     });
     if let Some((t, b)) = note {
         notify(app, t, b);
+    }
+    if let Some(t) = ready {
+        notify(app, t, "Changes ready — review the diff and create the PR".into());
     }
     if let Some((wt, title)) = quality {
         let ident = crate::inbox::find(app, task).map(|i| i.issue.identifier).unwrap_or(title); // worktree dir is the identifier
@@ -561,10 +573,10 @@ mod tests {
     fn prompts() {
         assert!(DONE_SUFFIX.ends_with("the line MURIM_DONE."));
         let p = quality_prompt("ENG-1", "origin/main");
-        for k in ["/ponytail:ponytail-review", "vs origin/main", "gh pr create --draft", "Fixes ENG-1", "not available", "no AI attribution"] {
+        for k in ["/ponytail:ponytail-review", "vs origin/main", "Do NOT push", ".murim/pr.md", "Fixes ENG-1", "not available", "no AI attribution"] {
             assert!(p.contains(k), "{k}");
         }
-        assert!(p.ends_with("line MURIM_PR_OPENED."));
+        assert!(p.ends_with("line MURIM_READY."));
     }
 
     #[test]

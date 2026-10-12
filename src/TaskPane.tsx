@@ -3,13 +3,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Terminal from "./Terminal";
 import IssueView from "./IssueView";
+import ReviewView from "./ReviewView";
 import { Item, Session, PrHealth, Repo, Mode, LABEL, OVERALL, SEV, STEP, LogEntry, MODE_LABEL } from "./types";
 import { ClaudeMark, ClaudeIcon, PrIcon } from "./Icons";
 
 const prBadge = (p: PrHealth) => (
   <button className={`chip ${SEV[p.overall] ?? "grey"}`} title={`Open PR: ${p.title}`} onClick={() => openUrl(p.url)}><PrIcon color="" title="" />#{p.number} {OVERALL[p.overall] ?? p.overall} ↗</button>
 );
-type Tab = "issue" | "claude" | "pr";
+type Tab = "issue" | "claude" | "review" | "pr";
 
 // ponytail: questions shape is backend-defined JSON; accept {questions:[{question}]}, [{question}], or strings.
 const texts = (q: unknown): string[] => {
@@ -18,7 +19,7 @@ const texts = (q: unknown): string[] => {
 };
 
 export default function TaskPane({ item, session, pr, log, repos, defaultMode }: { item: Item; session?: Session; pr?: PrHealth; log: LogEntry[]; repos: Repo[]; defaultMode: Mode }) {
-  const [tab, setTab] = useState<Tab>(session?.status === "needsInput" ? "claude" : "issue");
+  const [tab, setTab] = useState<Tab>(session?.status === "needsInput" ? "claude" : session?.prFlow === "awaitingReview" ? "review" : "issue");
   const [mode, setMode] = useState<Mode>(defaultMode);
   const [prompt, setPrompt] = useState("");
   const [err, setErr] = useState("");
@@ -76,7 +77,7 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
         {session && !alive && (
           <div className="group">
             <input placeholder="Follow-up prompt (optional)" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-            <button className="btn primary" onClick={resume}>↻ Resume Claude</button>
+            <button className={`btn ${session.prFlow === "awaitingReview" ? "" : "primary"}`} onClick={resume}>↻ Resume Claude</button>
           </div>
         )}
         {pr && session && (
@@ -94,9 +95,11 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
       <nav className="seg">
         <T id="issue">Issue</T>
         <T id="claude"><ClaudeMark size={12} />Claude<ClaudeIcon status={session?.status} /></T>
+        {session && <T id="review">Review{session.prFlow === "awaitingReview" && <span className="count attn">1</span>}</T>}
         <T id="pr">PR{pr && ` #${pr.number}`}{!!session?.escalations?.length && <span className="count">{session.escalations.length}</span>}</T>
       </nav>
       {tab === "issue" && <IssueView issueId={id} />}
+      {tab === "review" && session && <ReviewView issueId={id} refreshKey={`${session.prFlow}:${session.status}`} onRequested={() => setTab("claude")} />}
       {tab === "claude" && (
         <>
           {qs.length > 0 && (
@@ -111,7 +114,7 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
               <ClaudeMark size={28} />
               <p>{session ? "Claude isn't running for this task." : "Claude hasn't been started for this task."}</p>
               {!item.repo ? <p className="muted">Pick a repo first.</p> : session
-                ? <button className="btn primary" onClick={resume}>↻ Resume Claude</button>
+                ? <button className={`btn ${session.prFlow === "awaitingReview" ? "" : "primary"}`} onClick={resume}>↻ Resume Claude</button>
                 : <button className="btn primary" onClick={start}><ClaudeMark />Start Claude · {MODE_LABEL[mode]}</button>}
             </div>
           )}
