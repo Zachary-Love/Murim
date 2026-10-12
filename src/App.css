@@ -230,8 +230,8 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .rv-overview h2 { font-size: 15px; color: var(--text); }
 .review-agent { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .review-agent > .term { margin-top: 10px; }
-.review-agent .draft { flex: none; max-height: 45%; min-height: 0; margin: 0 16px 16px; }
-.draft-body { min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.review-agent .draft { flex: none; max-height: 45%; min-height: 0; margin: 0 16px 16px; display: flex; flex-direction: column; } /* body scrolls, event + Post stay visible */
+.draft-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
 .draft .q-head { justify-content: space-between; }
 .draft .reload { font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--accent); }
 .draft textarea { min-height: 56px; }
