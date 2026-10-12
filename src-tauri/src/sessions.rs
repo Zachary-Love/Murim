@@ -407,6 +407,79 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
     Ok(())
 }
 
+// ---- extra shells: plain login shells in the task's worktree, shown as terminal tabs ----
+
+/// Shell ids are `<issueId>#<n>`; they share the PTY map, ring buffers and pty_* commands with Claude.
+fn shell_prefix(issue_id: &str) -> String {
+    format!("{issue_id}#")
+}
+
+#[tauri::command]
+pub fn open_shell(app: AppHandle, issue_id: String) -> Result<String, String> {
+    let wt = with_session(&app, &issue_id, |s| s.worktree.clone()).ok_or("Start Claude first: the task has no worktree yet")?;
+    let pair = native_pty_system().openpty(PtySize { rows: 40, cols: 120, pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string())?;
+    let mut c = CommandBuilder::new(std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()));
+    c.arg("-l");
+    for (k, v) in &shell_env().0 {
+        c.env(k, v);
+    }
+    c.cwd(&wt);
+    c.env("TERM", "xterm-256color");
+    let child = pair.slave.spawn_command(c).map_err(|e| e.to_string())?;
+    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    let id = {
+        let mut g = sessions(&app).0.lock().unwrap();
+        g.gen += 1;
+        let gen = g.gen;
+        let id = format!("{}{gen}", shell_prefix(&issue_id));
+        g.ptys.insert(id.clone(), Pty { gen, writer, master: pair.master, child });
+        g.bufs.insert(id.clone(), VecDeque::new());
+        id
+    };
+    let (a, i) = (app.clone(), id.clone());
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 8192];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            {
+                let mut g = sessions(&a).0.lock().unwrap();
+                let b = g.bufs.entry(i.clone()).or_default();
+                b.extend(&buf[..n]);
+                let over = b.len().saturating_sub(RING);
+                b.drain(..over);
+            }
+            let _ = a.emit("pty-output", json!({"issueId": i, "data": B64.encode(&buf[..n])}));
+        }
+        let mut g = sessions(&a).0.lock().unwrap();
+        g.ptys.remove(&i);
+        g.bufs.remove(&i);
+        drop(g);
+        let _ = a.emit("shells-changed", &i);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn list_shells(state: State<Sessions>, issue_id: String) -> Vec<String> {
+    let pre = shell_prefix(&issue_id);
+    let mut v: Vec<String> = state.0.lock().unwrap().ptys.keys().filter(|k| k.starts_with(&pre)).cloned().collect();
+    v.sort_by_key(|k| k[pre.len()..].parse::<u64>().unwrap_or(0)); // open order
+    v
+}
+
+#[tauri::command]
+pub fn close_shell(state: State<Sessions>, id: String) {
+    // reader thread sees EOF, cleans up and emits shells-changed
+    if id.contains('#') {
+        if let Some(p) = state.0.lock().unwrap().ptys.get_mut(&id) {
+            let _ = p.child.kill();
+        }
+    }
+}
+
 fn write_pty(app: &AppHandle, id: &str, data: &[u8]) -> Result<(), String> {
     let mut g = sessions(app).0.lock().unwrap();
     let p = g.ptys.get_mut(id).ok_or("no running terminal")?;

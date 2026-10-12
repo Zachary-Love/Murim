@@ -1,11 +1,13 @@
-import { useState, ReactNode } from "react";
+import { useEffect, useState, ReactNode } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Terminal from "./Terminal";
 import IssueView from "./IssueView";
 import ReviewView from "./ReviewView";
 import { Item, Session, PrHealth, Repo, Mode, LABEL, OVERALL, SEV, STEP, LogEntry, MODE_LABEL } from "./types";
-import { ClaudeMark, ClaudeIcon, PrIcon } from "./Icons";
+import { ClaudeIcon, PrIcon } from "./Icons";
+import logo from "./assets/logo-mark.svg";
 
 const prBadge = (p: PrHealth) => (
   <button className={`chip ${SEV[p.overall] ?? "grey"}`} title={`Open PR: ${p.title}`} onClick={() => openUrl(p.url)}><PrIcon color="" title="" />#{p.number} {OVERALL[p.overall] ?? p.overall} ↗</button>
@@ -26,7 +28,18 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
   const [busy, setBusy] = useState(false);
   const [own, setOwn] = useState<string | null>(null); // escalation id with open textarea
   const [text, setText] = useState("");
+  const [term, setTerm] = useState("claude"); // "claude" or a shell id
+  const [shells, setShells] = useState<string[]>([]);
   const id = item.issue.id;
+  useEffect(() => {
+    const load = () => invoke<string[]>("list_shells", { issueId: id }).then((v) => {
+      setShells(v);
+      setTerm((t) => (t === "claude" || v.includes(t) ? t : "claude")); // closed/exited shell falls back to Claude
+    }).catch(() => {});
+    load();
+    const un = listen("shells-changed", load);
+    return () => { un.then((f) => f()); };
+  }, [id]);
   const run = (cmd: string, args: object = {}) => invoke(cmd, { issueId: id, ...args }).then(() => setErr("")).catch((e) => setErr(String(e)));
   const resolve = async (escalationId: string, choice: string, txt: string | null = null) => {
     setBusy(true);
@@ -43,26 +56,30 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
   const resume = () => run("resume_task", { prompt: prompt || null }).then(() => setTab("claude"));
   const pickRepo = !item.repo || item.repo.source === "semantic" || item.repo.source === "claude";
   const T = ({ id, children }: { id: Tab; children: ReactNode }) => <button className={tab === id ? "on" : ""} onClick={() => setTab(id)}>{children}</button>;
+  const showTerm = (t: string) => { setTerm(t); setTab("claude"); };
+  const addShell = () => invoke<string>("open_shell", { issueId: id }).then((t) => { setShells((v) => [...v, t]); showTerm(t); setErr(""); }).catch((e) => setErr(String(e)));
   return (
     <div className="pane">
-      <header className="pane-head">
-        <button className="chip mono" title="Open in Linear" onClick={() => openUrl(item.issue.url)}>{item.issue.identifier} ↗</button>
-        <h2 className="pane-title" title={item.issue.title}>{item.issue.title}</h2>
-        {session && <span className={`chip status ${session.status}`}><ClaudeIcon status={session.status} />{LABEL[session.status]}</span>}
-        {session && <span className="chip step">{STEP[session.prFlow ?? "none"] ?? "Implementing"}</span>}
-        {pr && prBadge(pr)}
-      </header>
-      <div className="toolbar">
-        {item.resolving && <span className="chip">Matching repo…</span>}
-        {pickRepo && (
-          <label className="field">Repo
-            <select value={item.repo?.path ?? ""} onChange={(e) => invoke("set_issue_repo", { issueId: id, path: e.target.value }).catch((x) => setErr(String(x)))}>
+      <header className="topbar">
+        <nav className="seg">
+          <T id="issue">Issue</T>
+          <T id="claude">Claude<ClaudeIcon status={session?.status} /></T>
+          {session && <T id="review">Review{(session.prFlow === "awaitingReview" || session.prFlow === "opened") && <span className="count attn">1</span>}</T>}
+          <T id="pr">PR{pr && ` #${pr.number}`}{!!session?.escalations?.length && <span className="count">{session.escalations.length}</span>}</T>
+        </nav>
+        <div className="topbar-right">
+          <button className="chip mono" title="Open in Linear" onClick={() => openUrl(item.issue.url)}>{item.issue.identifier} ↗</button>
+          <h2 className="pane-title" title={item.issue.title}>{item.issue.title}</h2>
+          {session && <span className={`chip status ${session.status}`}><ClaudeIcon status={session.status} />{LABEL[session.status]}</span>}
+          {session && <span className="chip step">{STEP[session.prFlow ?? "none"] ?? "Implementing"}</span>}
+          {pr && prBadge(pr)}
+          {item.resolving && <span className="chip">Matching repo…</span>}
+          {pickRepo && (
+            <select value={item.repo?.path ?? ""} title="Repo" onChange={(e) => invoke("set_issue_repo", { issueId: id, path: e.target.value }).catch((x) => setErr(String(x)))}>
               {!item.repo && <option value="" disabled>Pick repo…</option>}
               {repos.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
             </select>
-          </label>
-        )}
-        <div className="group claude">
+          )}
           {alive ? (
             <button className="btn danger" onClick={() => run("stop_task")}>■ Stop Claude</button>
           ) : (
@@ -70,52 +87,57 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
               <select value={mode} title="Claude Code permission mode" className={mode === "skip" ? "warn" : ""} onChange={(e) => setMode(e.target.value as Mode)}>
                 {(Object.keys(MODE_LABEL) as Mode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
               </select>
-              <button className={`btn ${session ? "" : "primary"}`} disabled={!item.repo} title={item.repo ? (session ? "Start a fresh Claude conversation in this worktree" : "") : "Pick a repo first"} onClick={start}><ClaudeMark />{session ? "New session" : "Start Claude"}</button>
+              <button className={`btn ${session ? "" : "primary"}`} disabled={!item.repo} title={item.repo ? (session ? "Start a fresh Claude conversation in this worktree" : "") : "Pick a repo first"} onClick={start}>{session ? "New session" : "Start Claude"}</button>
+            </>
+          )}
+          {session && !alive && (
+            <>
+              <input placeholder="Follow-up prompt (optional)" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+              <button className={`btn ${session.prFlow === "awaitingReview" ? "" : "primary"}`} onClick={resume}>↻ Resume Claude</button>
+            </>
+          )}
+          {pr && session && (
+            <>
+              <button className={`btn toggle ${session.tempering ? "on" : ""}`} title="Babysit the PR: rerun CI, fix failures, answer reviews" onClick={() => run("set_tempering", { on: !session.tempering })}>🔥 Tempering {session.tempering ? "on" : "off"}</button>
+              <select value={session.replyMode ?? "terse"} title="How Claude replies to review comments" onChange={(e) => run("set_reply_mode", { mode: e.target.value })}>
+                <option value="off">Replies: off</option>
+                <option value="terse">Replies: terse</option>
+                <option value="full">Replies: full</option>
+              </select>
             </>
           )}
         </div>
-        {session && !alive && (
-          <div className="group">
-            <input placeholder="Follow-up prompt (optional)" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-            <button className={`btn ${session.prFlow === "awaitingReview" ? "" : "primary"}`} onClick={resume}>↻ Resume Claude</button>
-          </div>
-        )}
-        {pr && session && (
-          <div className="group">
-            <button className={`btn toggle ${session.tempering ? "on" : ""}`} title="Babysit the PR: rerun CI, fix failures, answer reviews" onClick={() => run("set_tempering", { on: !session.tempering })}>🔥 Tempering {session.tempering ? "on" : "off"}</button>
-            <select value={session.replyMode ?? "terse"} title="How Claude replies to review comments" onChange={(e) => run("set_reply_mode", { mode: e.target.value })}>
-              <option value="off">Replies: off</option>
-              <option value="terse">Replies: terse</option>
-              <option value="full">Replies: full</option>
-            </select>
-          </div>
-        )}
+      </header>
+      <div className="tabbar">
+        <button className={`tab ${tab === "claude" && term === "claude" ? "on" : ""}`} onClick={() => showTerm("claude")}>Claude<ClaudeIcon status={session?.status} /></button>
+        {shells.map((t, n) => (
+          <span key={t} className={`tab ${tab === "claude" && term === t ? "on" : ""}`}>
+            <button onClick={() => showTerm(t)}>Terminal {n + 1}</button>
+            <button className="x" title="Close terminal" onClick={() => invoke("close_shell", { id: t })}>×</button>
+          </span>
+        ))}
+        <button className="tab add" title={session ? "New terminal in this task's worktree" : "Start Claude first: the task has no worktree yet"} disabled={!session} onClick={addShell}>+</button>
       </div>
       {err && <div className="banner">{err}</div>}
-      <nav className="seg">
-        <T id="issue">Issue</T>
-        <T id="claude"><ClaudeMark size={12} />Claude<ClaudeIcon status={session?.status} /></T>
-        {session && <T id="review">Review{(session.prFlow === "awaitingReview" || session.prFlow === "opened") && <span className="count attn">1</span>}</T>}
-        <T id="pr">PR{pr && ` #${pr.number}`}{!!session?.escalations?.length && <span className="count">{session.escalations.length}</span>}</T>
-      </nav>
       {tab === "issue" && <IssueView issueId={id} />}
       {tab === "review" && session && <ReviewView issueId={id} refreshKey={`${session.prFlow}:${session.status}`} onRequested={() => setTab("claude")} />}
-      {tab === "claude" && (
+      {tab === "claude" && term !== "claude" && <Terminal key={term} issueId={term} />}
+      {tab === "claude" && term === "claude" && (
         <>
           {qs.length > 0 && (
             <div className="question">
-              <div className="q-head"><ClaudeMark />Claude is asking — answer in the terminal below</div>
+              <div className="q-head">Claude is asking — answer in the terminal below</div>
               {qs.map((q, n) => <div key={n}>{q}</div>)}
             </div>
           )}
           {alive ? <Terminal issueId={id} /> : (
             // ponytail: no PTY means nothing to type into; show how to launch instead of a dead xterm.
             <div className="empty-state">
-              <ClaudeMark size={28} />
+              <img className="logo-lg" src={logo} alt="" />
               <p>{session ? "Claude isn't running for this task." : "Claude hasn't been started for this task."}</p>
               {!item.repo ? <p className="muted">Pick a repo first.</p> : session
                 ? <button className={`btn ${session.prFlow === "awaitingReview" ? "" : "primary"}`} onClick={resume}>↻ Resume Claude</button>
-                : <button className="btn primary" onClick={start}><ClaudeMark />Start Claude · {MODE_LABEL[mode]}</button>}
+                : <button className="btn primary" onClick={start}>Start Claude · {MODE_LABEL[mode]}</button>}
             </div>
           )}
         </>
@@ -140,7 +162,7 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
           )}
           {pr && session && (session.escalations ?? []).map((x) => (
             <section key={x.id} className="card amber">
-              <div className="q-head"><ClaudeMark />Claude disagrees with a review comment</div>
+              <div className="q-head">Claude disagrees with a review comment</div>
               <div className="meta mono">{x.path}</div>
               <blockquote>{x.comment}</blockquote>
               <p>{x.reason}</p>

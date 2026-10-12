@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ClaudeMark, PrIcon } from "./Icons";
+import { PrIcon } from "./Icons";
 import Markdown from "./Markdown";
 
 type Pr = { number: number; url: string; title: string; body: string; isDraft: boolean; state: string };
@@ -41,7 +41,7 @@ export default function ReviewView({ issueId, refreshKey, onRequested }: { issue
   return (
     <div className="issue review">
       <section className="card">
-        <div className="q-head"><ClaudeMark />{r.pr ? "Claude's draft pull request" : "No PR yet"}</div>
+        <div className="q-head">{r.pr ? "Claude's draft pull request" : "No PR yet"}</div>
         {r.pr ? (
           <>
             <div className="card-head">
@@ -62,7 +62,7 @@ export default function ReviewView({ issueId, refreshKey, onRequested }: { issue
         <div className="reply">
           <textarea value={ask} placeholder="Request changes from Claude…" onChange={(e) => setAsk(e.target.value)} />
           <button className="btn" disabled={busy || !ask.trim()} onClick={() => act("request_changes", { text: ask }, () => { setAsk(""); onRequested(); })}>
-            <ClaudeMark />Send to Claude
+            Send to Claude
           </button>
         </div>
       </section>
