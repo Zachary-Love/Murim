@@ -168,8 +168,8 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 
 /* pre-PR review */
 .review { display: flex; flex-direction: column; gap: 10px; }
-.review .pr-title { height: 32px; font-size: 14px; font-weight: 600; color: var(--text); }
-.review .pr-body { min-height: 120px; font: 12px/1.5 var(--mono); }
+.review .pr-title { flex: 1; font-size: 14px; font-weight: 600; }
+.review .pr-body { padding: 4px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; max-height: 320px; overflow-y: auto; }
 .review .reply { flex-direction: row; align-items: flex-end; }
 .review .reply textarea { min-height: 36px; }
 .count.attn { background: var(--claude); color: #1a0f0a; }
@@ -182,3 +182,4 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .diff .del { background: #ef6b6b1a; color: #f7b4b4; }
 .diff .hunk { color: var(--blue); background: #5aa9e60f; }
 .review > * { flex-shrink: 0; }
+.md h1, .md h2, .md h3 { font-size: 14px; margin: 10px 0 4px; color: var(--text); }

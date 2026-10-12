@@ -259,13 +259,13 @@ Contract additions (serde camelCase):
   - contains `MURIM_PR_OPENED` → `prFlow: opened`, poke the PR poller.
   - neither marker, no PR yet, not already needsInput → status `needsInput` + notify ("Claude stopped — reply needed?").
     (Tempering-invoked turns are exempt: they don't need the marker.)
-- **Pre-PR review (supersedes the push/PR step above):** the quality pass commits but does NOT push or open a PR; Claude writes
-  `.murim/pr.md` (title line, blank, body with `Fixes <IDENTIFIER>`) and ends with `MURIM_READY` → `prFlow: awaitingReview`
-  + notify. The **Review** tab shows the diff vs the merge base (incl. uncommitted edits), commits, and an editable title/body.
-  "Push & create PR" (`create_pr`) refuses on uncommitted changes, then `git push -u origin HEAD` + `gh pr create --draft`
-  → `prFlow: opened`. "Send to Claude" (`request_changes`) resumes Claude with the feedback; it re-commits, rewrites
-  `pr.md` and ends with `MURIM_READY` again. Non-marker turns while awaiting review stay idle.
-- PR poller: PR is draft + `ci == passing` + `prFlow == opened` → `gh pr ready <n>` once (`prFlow: ready`), tempering-log it.
+- **Draft-PR review:** Claude always opens the PR as a **draft** with its own title/description (`MURIM_PR_OPENED` →
+  `prFlow: awaitingReview` + notify). The **Review** tab shows the draft PR (title, rendered body), commits, and the diff vs
+  the merge base (incl. uncommitted edits). "Accept & mark ready" (`accept_pr`) refuses if anything is uncommitted or
+  unpushed, then `gh pr ready` → `prFlow: ready`. "Send to Claude" (`request_changes`) resumes Claude with the feedback; it
+  commits, pushes, updates the PR via `gh pr edit` if needed, and ends with `MURIM_PR_OPENED` again. Non-marker turns
+  while awaiting review stay idle. The user's accept replaces the old auto-ready-on-green-CI rule.
+- ~~PR poller auto-ready on green CI~~ — removed; the user accepts the draft instead.
 - `SessionInfo` gains `prFlow: none|reviewing|awaitingReview|opened|ready` (serde default none). UI: show it as a small step label in row + pane.
 
 Each phase ends with one runnable check (Rust unit test for the rules/state derivation; manual run for UI).

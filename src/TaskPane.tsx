@@ -19,7 +19,7 @@ const texts = (q: unknown): string[] => {
 };
 
 export default function TaskPane({ item, session, pr, log, repos, defaultMode }: { item: Item; session?: Session; pr?: PrHealth; log: LogEntry[]; repos: Repo[]; defaultMode: Mode }) {
-  const [tab, setTab] = useState<Tab>(session?.status === "needsInput" ? "claude" : session?.prFlow === "awaitingReview" ? "review" : "issue");
+  const [tab, setTab] = useState<Tab>(session?.status === "needsInput" ? "claude" : (session?.prFlow === "awaitingReview" || session?.prFlow === "opened") ? "review" : "issue");
   const [mode, setMode] = useState<Mode>(defaultMode);
   const [prompt, setPrompt] = useState("");
   const [err, setErr] = useState("");
@@ -95,7 +95,7 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
       <nav className="seg">
         <T id="issue">Issue</T>
         <T id="claude"><ClaudeMark size={12} />Claude<ClaudeIcon status={session?.status} /></T>
-        {session && <T id="review">Review{session.prFlow === "awaitingReview" && <span className="count attn">1</span>}</T>}
+        {session && <T id="review">Review{(session.prFlow === "awaitingReview" || session.prFlow === "opened") && <span className="count attn">1</span>}</T>}
         <T id="pr">PR{pr && ` #${pr.number}`}{!!session?.escalations?.length && <span className="count">{session.escalations.length}</span>}</T>
       </nav>
       {tab === "issue" && <IssueView issueId={id} />}

@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ClaudeMark } from "./Icons";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { ClaudeMark, PrIcon } from "./Icons";
+import Markdown from "./Markdown";
 
-type Review = { base: string; commits: string[]; stat: string; diff: string; truncated: boolean; uncommitted: string[]; title: string; body: string };
+type Pr = { number: number; url: string; title: string; body: string; isDraft: boolean; state: string };
+type Review = { base: string; commits: string[]; stat: string; diff: string; truncated: boolean; uncommitted: string[]; unpushed: number; pr: Pr | null };
 type File = { name: string; lines: string[]; add: number; del: number };
 
 // Split a unified diff into files; header lines (index/---/+++) are dropped from the body.
@@ -19,14 +22,12 @@ const cls = (l: string) => (l.startsWith("+") ? "add" : l.startsWith("-") ? "del
 
 export default function ReviewView({ issueId, refreshKey, onRequested }: { issueId: string; refreshKey: string; onRequested: () => void }) {
   const [r, setR] = useState<Review | null>(null);
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
   const [ask, setAsk] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     invoke<Review>("get_review", { issueId })
-      .then((v) => { setR(v); setTitle(v.title); setBody(v.body); setErr(""); })
+      .then((v) => { setR(v); setErr(""); })
       .catch((e) => setErr(String(e)));
   }, [issueId, refreshKey]);
   const act = async (cmd: string, args: object, then?: () => void) => {
@@ -36,20 +37,28 @@ export default function ReviewView({ issueId, refreshKey, onRequested }: { issue
   };
   if (!r) return err ? <div className="issue"><div className="banner">{err}</div></div> : <p className="empty-state">Loading diff…</p>;
   const fs = files(r.diff);
+  const dirty = r.uncommitted.length > 0 || r.unpushed > 0;
   return (
     <div className="issue review">
       <section className="card">
-        <div className="q-head"><ClaudeMark />Proposed pull request</div>
-        <input className="pr-title" value={title} placeholder="PR title" onChange={(e) => setTitle(e.target.value)} />
-        <textarea className="pr-body" value={body} placeholder="PR description" onChange={(e) => setBody(e.target.value)} />
-        {r.uncommitted.length > 0 && <div className="banner">Uncommitted changes ({r.uncommitted.length} file{r.uncommitted.length === 1 ? "" : "s"}). Ask Claude to commit before creating the PR.</div>}
+        <div className="q-head"><ClaudeMark />{r.pr ? "Claude's draft pull request" : "No PR yet"}</div>
+        {r.pr ? (
+          <>
+            <div className="card-head">
+              <button className="chip" title="Open on GitHub" onClick={() => openUrl(r.pr!.url)}><PrIcon color="" title="" />#{r.pr.number} {r.pr.isDraft ? "Draft" : r.pr.state === "OPEN" ? "Ready for review" : r.pr.state.toLowerCase()} ↗</button>
+              <span className="link-btn pr-title">{r.pr.title}</span>
+            </div>
+            <div className="pr-body">{r.pr.body ? <Markdown text={r.pr.body} /> : <p className="empty">No description</p>}</div>
+          </>
+        ) : <p className="muted">Claude opens a draft PR with its own title and description after the quality pass.</p>}
+        {dirty && <div className="banner">{r.uncommitted.length ? `${r.uncommitted.length} uncommitted file${r.uncommitted.length === 1 ? "" : "s"}` : `${r.unpushed > 1e9 ? "Branch not pushed" /* backend: no upstream = usize::MAX */ : `${r.unpushed} unpushed commit${r.unpushed === 1 ? "" : "s"}`}`}: the PR doesn't include everything yet. Ask Claude to commit and push.</div>}
         {err && <div className="banner">{err}</div>}
-        <div className="group">
-          <button className="btn primary" disabled={busy || !title.trim() || r.uncommitted.length > 0 || !r.commits.length} onClick={() => act("create_pr", { title, body })}>
-            Push & create PR
-          </button>
-          <span className="muted">{r.commits.length} commit{r.commits.length === 1 ? "" : "s"} vs {r.base} · opens as draft, marked ready when CI passes</span>
-        </div>
+        {r.pr?.isDraft && (
+          <div className="group">
+            <button className="btn primary" disabled={busy || dirty} onClick={() => act("accept_pr", {})}>✓ Accept & mark ready for review</button>
+            <span className="muted">{r.commits.length} commit{r.commits.length === 1 ? "" : "s"} vs {r.base}</span>
+          </div>
+        )}
         <div className="reply">
           <textarea value={ask} placeholder="Request changes from Claude…" onChange={(e) => setAsk(e.target.value)} />
           <button className="btn" disabled={busy || !ask.trim()} onClick={() => act("request_changes", { text: ask }, () => { setAsk(""); onRequested(); })}>

@@ -1,6 +1,6 @@
-//! Pre-PR review: the user reads Claude's diff and proposed PR, then Murim pushes and opens it.
+//! Draft-PR review: Claude opens a draft PR; the user reads the diff + description, then accepts (marks it ready) or asks for changes.
 use crate::hooks::PrFlow;
-use crate::sessions::{self, git, title_of, with_session, pr_draft};
+use crate::sessions::{self, changes_prompt, git, with_session};
 use serde::Serialize;
 use std::path::Path;
 use tauri::AppHandle;
@@ -17,19 +17,14 @@ pub struct Review {
     diff: String,
     truncated: bool,
     uncommitted: Vec<String>,
-    title: String,
-    body: String,
+    /// local commits not on the remote branch yet
+    unpushed: usize,
+    /// the draft PR as on GitHub (`gh pr view` JSON), null before Claude opens it
+    pr: Option<serde_json::Value>,
 }
 
 fn worktree(app: &AppHandle, id: &str) -> Result<String, String> {
     with_session(app, id, |s| s.worktree.clone()).ok_or_else(|| "no Claude session for this task".into())
-}
-
-/// `.murim/pr.md`: title on the first line, body after.
-fn parse_pr(md: &str) -> (String, String) {
-    let md = md.trim_start();
-    let (t, b) = md.split_once('\n').unwrap_or((md, ""));
-    (t.trim().trim_start_matches('#').trim().to_string(), b.trim().to_string())
 }
 
 fn dirty(wt: &Path) -> Result<Vec<String>, String> {
@@ -54,32 +49,33 @@ fn review_at(wt: &Path) -> Result<Review, String> {
         }
         diff.truncate(cut);
     }
-    let (title, body) = parse_pr(&std::fs::read_to_string(wt.join(".murim/pr.md")).unwrap_or_default());
     Ok(Review {
+        unpushed: unpushed(wt),
+        pr: crate::tempering::gh(&wt.to_string_lossy(), &["pr", "view", "--json", "number,url,title,body,isDraft,state"]).ok().and_then(|o| serde_json::from_str(&o).ok()),
         commits: git(wt, &["log", "--oneline", "--no-decorate", &format!("{base}..HEAD")])?.lines().map(String::from).collect(),
         stat: git(wt, &["diff", "--stat", &base])?,
         uncommitted: dirty(wt)?,
         base: base_ref,
         diff,
         truncated,
-        title,
-        body,
     })
 }
 
+/// No upstream yet counts as everything unpushed.
+fn unpushed(wt: &Path) -> usize {
+    git(wt, &["rev-list", "--count", "@{u}..HEAD"]).ok().and_then(|n| n.parse().ok()).unwrap_or(usize::MAX)
+}
+
+/// The user accepts Claude's draft: mark it ready for review.
 #[tauri::command]
-pub fn create_pr(app: AppHandle, issue_id: String, title: String, body: String) -> Result<(), String> {
-    if title.trim().is_empty() {
-        return Err("PR title is empty".into());
-    }
+pub fn accept_pr(app: AppHandle, issue_id: String) -> Result<(), String> {
     let wt = worktree(&app, &issue_id)?;
-    if !dirty(Path::new(&wt))?.is_empty() {
-        return Err("The worktree has uncommitted changes. Ask Claude to commit them first.".into());
+    let p = Path::new(&wt);
+    if !dirty(p)?.is_empty() || unpushed(p) > 0 {
+        return Err("The branch has changes that aren't on the PR yet. Ask Claude to commit and push them first.".into());
     }
-    git(Path::new(&wt), &["push", "-u", "origin", "HEAD"])?;
-    // ponytail: still opened as draft; the existing CI rule flips it to ready once checks pass.
-    crate::tempering::gh(&wt, &["pr", "create", "--draft", "--title", title.trim(), "--body", &body])?;
-    with_session(&app, &issue_id, |s| s.pr_flow = PrFlow::Opened);
+    crate::tempering::gh(&wt, &["pr", "ready"])?;
+    with_session(&app, &issue_id, |s| s.pr_flow = PrFlow::Ready);
     crate::github::poke(&app);
     Ok(())
 }
@@ -89,20 +85,12 @@ pub fn request_changes(app: AppHandle, issue_id: String, text: String) -> Result
     if text.trim().is_empty() {
         return Err("Describe the changes you want".into());
     }
-    let ident = with_session(&app, &issue_id, |s| title_of(s)).ok_or("no Claude session for this task")?; // worktree dir = identifier
-    sessions::resume_task(app, issue_id, Some(format!("Review feedback on your changes: {}\n\nApply it and commit (do not push). {}", text.trim(), pr_draft(&ident))))
+    sessions::resume_task(app, issue_id, Some(changes_prompt(text.trim())))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn pr_md() {
-        assert_eq!(parse_pr("\n# Add thing\n\nBody\nFixes FOR-1\n"), ("Add thing".into(), "Body\nFixes FOR-1".into()));
-        assert_eq!(parse_pr("Only title"), ("Only title".into(), "".into()));
-        assert_eq!(parse_pr(""), ("".into(), "".into()));
-    }
 
     #[test]
     fn review_of_branch_with_uncommitted_edit() {
@@ -122,15 +110,15 @@ mod tests {
         g(&wt, &["checkout", "-qb", "feat"]);
         std::fs::write(wt.join("a.txt"), "two\n").unwrap();
         c("change a");
-        std::fs::create_dir_all(wt.join(".murim")).unwrap();
-        std::fs::write(wt.join(".murim/pr.md"), "Change a\n\nFixes X-1").unwrap();
         std::fs::write(wt.join("a.txt"), "three\n").unwrap(); // uncommitted
         let r = review_at(&wt).unwrap();
         assert_eq!(r.base, "origin/main");
         assert_eq!(r.commits.len(), 1);
         assert!(r.diff.contains("+three") && r.diff.contains("-one"), "{}", r.diff);
         assert!(r.uncommitted.iter().any(|l| l.ends_with("a.txt")));
-        assert_eq!((r.title.as_str(), r.body.as_str()), ("Change a", "Fixes X-1"));
+        assert_eq!(r.unpushed, usize::MAX); // feat has no upstream
+        g(&wt, &["push", "-q", "-u", "origin", "feat"]);
+        assert_eq!(unpushed(&wt), 0);
         let _ = std::fs::remove_dir_all(&root);
     }
 }

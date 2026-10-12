@@ -12,7 +12,7 @@ export type ReplyMode = "off" | "terse" | "full";
 export type Escalation = { id: string; threadId: string; path: string; comment: string; reason: string };
 export type LogEntry = { issueId: string; at: number | string; message: string };
 export const LABEL: Record<Status, string> = { starting: "Starting", working: "Working", needsInput: "Needs input", idle: "Idle", ended: "Ended" };
-export const STEP: Record<string, string> = { none: "Implementing", reviewing: "Quality pass", awaitingReview: "Awaiting your review", opened: "PR draft", ready: "Ready for review" };
+export const STEP: Record<string, string> = { none: "Implementing", reviewing: "Quality pass", awaitingReview: "Draft PR · your review", opened: "Draft PR · your review", ready: "Ready for review" };
 export type Repo = { name: string; path: string };
 export type PrHealth = {
   number: number; url: string; title: string; state: string; isDraft: boolean; ci: string; failingChecks: string[];
@@ -47,7 +47,7 @@ export const STAGE_LABEL: Record<Stage, string> = { todo: "Todo", progress: "In 
 export const stage = (i: Item, s?: Session, pr?: PrHealth): Stage => {
   if (i.issue.stateType === "completed" || pr?.overall === "merged") return "done";
   if (pr && pr.state === "OPEN" && !pr.isDraft) return "codeReview";
-  if (s?.status === "needsInput" || s?.prFlow === "awaitingReview" || s?.escalations?.length || (pr?.isDraft && s?.status !== "working" && s?.status !== "starting")) return "needsReview";
+  if (s?.status === "needsInput" || s?.prFlow === "awaitingReview" || s?.prFlow === "opened" || s?.escalations?.length || (pr?.isDraft && s?.status !== "working" && s?.status !== "starting")) return "needsReview";
   if (i.issue.stateType === "started" || s) return "progress";
   return "todo";
 };
