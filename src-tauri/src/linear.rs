@@ -1,5 +1,6 @@
 use serde::Serialize;
 use serde_json::{json, Value};
+use crate::reviews::{pr_url, Assignee, LinkedIssue};
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -68,7 +69,7 @@ const DETAIL: &str = r#"query($id: String!) { issue(id: $id) { description prior
 
 #[tauri::command]
 pub async fn get_issue_detail(issue_id: String) -> Result<IssueDetail, String> {
-    let key = crate::settings::entry()?.get_password().map_err(|_| "Add your Linear API key in Settings".to_string())?;
+    let key = api_key()?;
     // ureq is blocking: keep it off the async runtime.
     let v = tauri::async_runtime::spawn_blocking(move || post(&key, json!({ "query": DETAIL, "variables": { "id": issue_id } })))
         .await
@@ -128,6 +129,67 @@ fn parse(json: &Value) -> Result<(Vec<Issue>, Option<String>), String> {
     Ok((issues, next))
 }
 
+const MY_TEAMS: &str = r#"query { viewer { teams { nodes { id } } } }"#;
+const TEAM_PRS: &str = r#"query($teams: [ID!]) { issues(first: 100, filter: { team: { id: { in: $teams } }, state: { type: { eq: "started" } } }) { nodes { identifier url assignee { id name avatarUrl } attachments { nodes { url } } } } }"#;
+const BY_IDENT: &str = r#"query($id: String!) { issue(id: $id) { identifier url assignee { id name avatarUrl } } }"#;
+
+pub fn api_key() -> Result<String, String> {
+    crate::settings::entry()?.get_password().map_err(|_| "Add your Linear API key in Settings".to_string())
+}
+
+fn gql_err(json: &Value) -> Option<String> {
+    let errs = json.get("errors").and_then(Value::as_array).filter(|e| !e.is_empty())?;
+    Some(format!("Linear: {}", errs.iter().filter_map(|e| e["message"].as_str()).collect::<Vec<_>>().join("; ")))
+}
+
+fn assignee(v: &Value) -> Option<Assignee> {
+    Some(Assignee { id: v["id"].as_str()?.into(), name: v["name"].as_str().unwrap_or_default().into(), avatar_url: v["avatarUrl"].as_str().map(String::from) })
+}
+
+fn linked(n: &Value) -> LinkedIssue {
+    LinkedIssue { identifier: n["identifier"].as_str().unwrap_or_default().into(), url: n["url"].as_str().unwrap_or_default().into() }
+}
+
+fn parse_team_links(json: &Value) -> Result<Vec<(String, LinkedIssue, Option<Assignee>)>, String> {
+    if let Some(e) = gql_err(json) {
+        return Err(e);
+    }
+    let mut out = vec![];
+    for n in json["data"]["issues"]["nodes"].as_array().ok_or("Linear: unexpected response")? {
+        for a in n["attachments"]["nodes"].as_array().into_iter().flatten() {
+            let url = a["url"].as_str().unwrap_or_default();
+            if pr_url(url).is_some() {
+                out.push((url.to_string(), linked(n), assignee(&n["assignee"])));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn parse_ident(json: &Value) -> Result<Option<(LinkedIssue, Option<Assignee>)>, String> {
+    match gql_err(json) {
+        Some(e) if e.contains("not found") => return Ok(None),
+        Some(e) => return Err(e),
+        None => {}
+    }
+    let n = &json["data"]["issue"];
+    Ok((!n.is_null()).then(|| (linked(n), assignee(&n["assignee"]))))
+}
+
+/// PRs attached to started issues in the viewer's teams. ponytail: first 100 issues; page if teams outgrow it.
+pub fn team_pr_links(key: &str) -> Result<Vec<(String, LinkedIssue, Option<Assignee>)>, String> {
+    let t = post(key, json!({ "query": MY_TEAMS }))?;
+    if let Some(e) = gql_err(&t) {
+        return Err(e);
+    }
+    let teams: Vec<&str> = t["data"]["viewer"]["teams"]["nodes"].as_array().into_iter().flatten().filter_map(|n| n["id"].as_str()).collect();
+    parse_team_links(&post(key, json!({ "query": TEAM_PRS, "variables": { "teams": teams } }))?)
+}
+
+pub fn issue_by_ident(key: &str, ident: &str) -> Result<Option<(LinkedIssue, Option<Assignee>)>, String> {
+    parse_ident(&post(key, json!({ "query": BY_IDENT, "variables": { "id": ident } }))?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -164,5 +226,30 @@ mod tests {
         assert_eq!(d.comments[0].author, "Ann");
         assert_eq!(serde_json::to_value(&d.comments[0]).unwrap()["createdAt"], "2024-01-01T00:00:00Z");
         assert!(parse_detail(&json!({ "data": { "issue": null } })).is_err());
+    }
+
+    #[test]
+    fn team_links_keep_only_pr_attachments() {
+        let j = json!({"data": {"issues": {"nodes": [
+            {"identifier": "ENG-1", "url": "l1", "assignee": {"id": "u1", "name": "Amy", "avatarUrl": "https://a"},
+             "attachments": {"nodes": [{"url": "https://github.com/o/r/pull/4"}, {"url": "https://figma.com/x"}]}},
+            {"identifier": "ENG-2", "url": "l2", "assignee": null, "attachments": {"nodes": []}}
+        ]}}});
+        let v = parse_team_links(&j).unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].0, "https://github.com/o/r/pull/4");
+        assert_eq!(v[0].1.identifier, "ENG-1");
+        assert_eq!(v[0].2.as_ref().unwrap().avatar_url.as_deref(), Some("https://a"));
+        assert!(parse_team_links(&json!({"errors": [{"message": "bad"}]})).is_err());
+    }
+
+    #[test]
+    fn issue_by_ident_parse() {
+        let j = json!({"data": {"issue": {"identifier": "ENG-9", "url": "l", "assignee": {"id": "u", "name": "Bo", "avatarUrl": null}}}});
+        let (i, a) = parse_ident(&j).unwrap().unwrap();
+        assert_eq!((i.identifier.as_str(), a.unwrap().name.as_str()), ("ENG-9", "Bo"));
+        assert!(parse_ident(&json!({"data": {"issue": null}})).unwrap().is_none());
+        // Linear answers an unknown identifier with an "Entity not found" error: treat as no issue
+        assert!(parse_ident(&json!({"errors": [{"message": "Entity not found: Issue"}]})).unwrap().is_none());
     }
 }

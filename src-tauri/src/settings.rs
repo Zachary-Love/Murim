@@ -38,6 +38,17 @@ pub struct Settings {
     /// Linear label -> repo path (remembered matches).
     #[serde(default)]
     pub repo_map: std::collections::HashMap<String, String>,
+    /// Last-used Reviews filters.
+    pub review_filters: ReviewFilters,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
+#[serde(default)]
+pub struct ReviewFilters {
+    /// Linear user ids, or "unlinked"
+    pub authors: Vec<String>,
+    /// Bucket names: needsReview, draft, ciFailing, changesRequested, approved
+    pub statuses: Vec<String>,
 }
 
 /// Missing or corrupt file yields defaults.
@@ -72,7 +83,16 @@ pub fn save_settings(app: AppHandle, mut settings: Settings) -> Result<(), Strin
     let d = dir(&app)?;
     // caffeine is owned by the sidebar toggle; don't let a stale form overwrite it.
     settings.caffeine = load(&d).caffeine;
+    settings.review_filters = load(&d).review_filters; // owned by the Reviews filter bar
     save(&d, &settings)
+}
+
+#[tauri::command]
+pub fn set_review_filters(app: AppHandle, filters: ReviewFilters) -> Result<(), String> {
+    let d = dir(&app)?;
+    let mut s = load(&d);
+    s.review_filters = filters;
+    save(&d, &s)
 }
 
 #[tauri::command]
@@ -94,7 +114,7 @@ mod tests {
         let d = std::env::temp_dir().join(format!("murim-settings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         assert_eq!(load(&d), Settings::default()); // missing
-        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into() };
+        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into(), review_filters: ReviewFilters { authors: vec!["u1".into(), "unlinked".into()], statuses: vec!["draft".into()] } };
         save(&d, &s).unwrap();
         assert_eq!(load(&d), s);
         std::fs::write(d.join("settings.json"), "{not json").unwrap();

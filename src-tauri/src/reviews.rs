@@ -1,8 +1,13 @@
 //! Review mode: other people's PRs (GitHub review requests + the team's Linear-linked PRs), authors as Linear users,
 //! and an agent that drafts a review in a detached checkout. Nothing is posted until the user clicks.
 use crate::github::{pr_node, Overall, PrHealth};
+use crate::{github, linear};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::{Condvar, Mutex};
+use std::time::Duration;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Assignee {
@@ -168,6 +173,125 @@ pub fn parse_draft(s: &str) -> Result<Draft, String> {
     Ok(d)
 }
 
+#[derive(Serialize, Clone, Default, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Payload {
+    pub prs: Vec<ReviewPr>,
+    pub error: Option<String>,
+}
+
+#[derive(Default)]
+pub struct Reviews {
+    payload: Mutex<Payload>,
+    /// identifier -> Linear issue (None = no such issue); per app run
+    idents: Mutex<HashMap<String, Option<(LinkedIssue, Option<Assignee>)>>>,
+    wake: (Mutex<bool>, Condvar),
+}
+
+fn search_query() -> String {
+    format!("query($q:String!){{viewer{{login}} search(query:$q,type:ISSUE,first:50){{nodes{{... on PullRequest{{{} body headRefName author{{login}} repository{{name owner{{login}}}}}}}}}}}}", github::PR_FIELDS)
+}
+
+fn url_query() -> String {
+    format!("query($u:URI!){{resource(url:$u){{... on PullRequest{{{} body headRefName author{{login}} repository{{name owner{{login}}}}}}}}}}", github::PR_FIELDS)
+}
+
+/// (viewer login, PRs where GitHub asks the viewer or one of their teams to review).
+fn requested(tok: &str) -> Result<(String, Vec<ReviewPr>), String> {
+    let j = github::gql(tok, &search_query(), json!({"q": "is:pr is:open review-requested:@me archived:false"}))?;
+    let me = j["data"]["viewer"]["login"].as_str().unwrap_or_default().to_string();
+    Ok((me, j["data"]["search"]["nodes"].as_array().into_iter().flatten().filter_map(|n| to_review(n, true)).collect()))
+}
+
+/// The team's Linear-linked PRs, minus URLs already fetched via search. ponytail: one GitHub query per PR; alias-batch if slow.
+fn team(tok: &str, skip: &[String]) -> Result<Vec<ReviewPr>, String> {
+    let key = linear::api_key()?;
+    let mut out: Vec<ReviewPr> = vec![];
+    for (url, issue, who) in linear::team_pr_links(&key)? {
+        if skip.contains(&url) || out.iter().any(|p| p.health.url == url) {
+            continue;
+        }
+        let j = github::gql(tok, &url_query(), json!({"u": url}))?;
+        if let Some(mut p) = to_review(&j["data"]["resource"], false) {
+            link(&mut p, issue, who);
+            out.push(p);
+        }
+    }
+    Ok(out)
+}
+
+/// Branch-name fallback for rows still unlinked (cached per run).
+fn link_by_branch(app: &AppHandle, prs: &mut [ReviewPr]) {
+    let Ok(key) = linear::api_key() else { return };
+    let st = app.state::<Reviews>();
+    for p in prs.iter_mut().filter(|p| p.issue.is_none()) {
+        let Some(id) = branch_ident(&p.branch) else { continue };
+        let hit = st.idents.lock().unwrap().get(&id).cloned();
+        let hit = match hit {
+            Some(h) => h,
+            None => match linear::issue_by_ident(&key, &id) {
+                Ok(h) => {
+                    st.idents.lock().unwrap().insert(id, h.clone());
+                    h
+                }
+                Err(_) => continue, // transient: retry next poll
+            },
+        };
+        if let Some((issue, who)) = hit {
+            link(p, issue, who);
+        }
+    }
+}
+
+/// Merge both sources; either may fail without hiding the other. Drops the viewer's own and non-open PRs.
+pub fn combine(gh: Result<(String, Vec<ReviewPr>), String>, team: Result<Vec<ReviewPr>, String>) -> Payload {
+    let errs: Vec<String> = [gh.as_ref().err(), team.as_ref().err()].into_iter().flatten().cloned().collect();
+    let (me, req) = gh.unwrap_or_default();
+    let mut prs = merge(req, team.unwrap_or_default());
+    prs.retain(|p| p.author_login != me && p.health.state == github::PrState::Open);
+    Payload { prs, error: (!errs.is_empty()).then(|| errs.join("; ")) }
+}
+
+fn poll(app: &AppHandle) {
+    let p = match github::token() {
+        Err(e) => Payload { prs: vec![], error: Some(e) },
+        Ok(tok) => {
+            let gh = requested(&tok);
+            let skip: Vec<String> = gh.as_ref().map(|(_, v)| v.iter().map(|p| p.health.url.clone()).collect()).unwrap_or_default();
+            let t = team(&tok, &skip);
+            let mut p = combine(gh, t);
+            link_by_branch(app, &mut p.prs);
+            p
+        }
+    };
+    let st = app.state::<Reviews>();
+    let mut cur = st.payload.lock().unwrap();
+    if *cur != p {
+        *cur = p;
+        let _ = app.emit("reviews-updated", &*cur);
+    }
+}
+
+pub fn start(app: AppHandle) {
+    std::thread::spawn(move || loop {
+        poll(&app);
+        let (m, cv) = &app.state::<Reviews>().wake;
+        drop(cv.wait_timeout_while(m.lock().unwrap(), Duration::from_secs(120), |woken| !*woken).unwrap().0);
+        *m.lock().unwrap() = false;
+    });
+}
+
+#[tauri::command]
+pub fn get_reviews(state: State<Reviews>) -> Payload {
+    state.payload.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub fn refresh_reviews(state: State<Reviews>) {
+    *state.wake.0.lock().unwrap() = true;
+    state.wake.1.notify_one();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,5 +371,17 @@ mod tests {
         assert!(parse_draft(r#"{"summary":"s","event":"APPR"#).is_err()); // half-written
         assert!(parse_draft(r#"{"summary":"s","event":"MERGE"}"#).unwrap_err().contains("event"));
         assert!(parse_draft("").is_err());
+    }
+
+    #[test]
+    fn combine_partial_failure() {
+        let pr = to_review(&node(1, "bob", "x"), true).unwrap();
+        let p = combine(Ok(("me".into(), vec![pr.clone()])), Err("Linear: no key".into()));
+        assert_eq!((p.prs.len(), p.error.as_deref()), (1, Some("Linear: no key")));
+        let p = combine(Err("Not logged in to GitHub".into()), Ok(vec![]));
+        assert!(p.prs.is_empty() && p.error.unwrap().contains("GitHub"));
+        let mine = to_review(&node(2, "me", "y"), false).unwrap();
+        let p = combine(Ok(("me".into(), vec![pr])), Ok(vec![mine])); // own PR dropped
+        assert_eq!(p.prs.len(), 1);
     }
 }
