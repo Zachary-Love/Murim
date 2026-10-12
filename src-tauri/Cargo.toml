@@ -1,6 +1,9 @@
 [package]
 name = "murim"
 version = "0.1.0"
+description = "One pane of glass for AI feature development"
+license = "MIT"
+repository = "https://github.com/Zachary-Love/Murim"
 edition = "2021"
 
 [lib]
