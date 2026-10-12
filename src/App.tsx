@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import Settings from "./Settings";
 import Caffeine from "./Caffeine";
 import { Item, Repo, Session, Mode, LogEntry, PrMap, SEV, OVERALL, sortItems, stage } from "./types";
-import { StateIcon, ClaudeIcon, PrIcon, ClaudeMark } from "./Icons";
+import { StateIcon, ClaudeIcon, PrIcon, ClaudeMark, GearIcon } from "./Icons";
 import TaskPane from "./TaskPane";
 
 type Payload = { items: Item[]; error: string | null };
@@ -68,7 +68,7 @@ export default function App() {
         </ul>
         <footer className="sidebar-footer">
           <Caffeine />
-          <button className={`btn icon ${showSettings ? "on" : ""}`} title="Settings" onClick={() => setShowSettings(!showSettings)}>⚙</button>
+          <button className={`btn icon ${showSettings ? "on" : ""}`} title="Settings" onClick={() => setShowSettings(!showSettings)}><GearIcon /></button>
         </footer>
       </aside>
       <main className="main">

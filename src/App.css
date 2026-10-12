@@ -90,6 +90,9 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .tasks .ident { font: 11px var(--mono); color: var(--dim); }
 .sidebar-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--line); }
 .sidebar-footer .err { flex-basis: 100%; }
+.sidebar-footer .btn.icon { background: none; border-color: transparent; box-shadow: none; color: var(--dim); }
+.sidebar-footer .btn.icon:hover { background: none; border-color: transparent; color: var(--text); }
+.sidebar-footer .btn.icon.on { background: none; border-color: transparent; color: var(--claude); }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .main > .settings { padding: 24px; overflow-y: auto; }
 
