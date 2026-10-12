@@ -59,3 +59,15 @@ export const FlameIcon = () => (
 export const FolderIcon = () => (
   <svg {...L}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
 );
+
+export const TasksIcon = () => (
+  <svg {...L}><path d="M9 6h11M9 12h11M9 18h11" /><path d="m3.5 6 1 1 2-2M3.5 12l1 1 2-2M3.5 18l1 1 2-2" /></svg>
+);
+
+export const ReviewsIcon = () => (
+  <svg {...L}><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-3" /><path d="m14 4-2 2 2 2" /></svg>
+);
+
+export const DownloadIcon = () => (
+  <svg {...L}><path d="M12 3v12M7 10l5 5 5-5" /><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></svg>
+);

@@ -67,8 +67,8 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 /* ---- layout ---- */
 .app { display: flex; height: 100%; }
 .sidebar { width: 296px; flex: none; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--line); }
-/* no native title bar: macOS traffic lights overlay the sidebar header, so leave room and keep both bars draggable */
-.brand { display: flex; align-items: center; gap: 4px; height: 52px; padding: 0 12px 0 80px; }
+/* no native title bar: traffic lights (x 14-66) span the 52px rail + 14px of this header, so 28px clears them; keep both bars draggable */
+.brand { display: flex; align-items: center; gap: 4px; height: 52px; padding: 0 12px 0 28px; }
 .brand h1 { display: flex; align-items: center; gap: 6px; flex: 1; font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: .01em; }
 .brand .btn.icon { background: none; border-color: transparent; color: var(--muted); }
 .brand .btn.icon:hover, .brand .btn.icon.on { background: var(--hover); border-color: var(--line-hi); color: var(--text); }
@@ -86,11 +86,14 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .tasks .row.attn { box-shadow: inset 2px 0 0 var(--brand); }
 .tasks .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tasks .ident { font: 11px var(--mono); color: var(--dim); }
-.sidebar-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--line); }
-.sidebar-footer .err { flex-basis: 100%; }
-.sidebar-footer .btn.icon { background: none; border-color: transparent; box-shadow: none; color: var(--dim); }
-.sidebar-footer .btn.icon:hover { background: none; border-color: transparent; color: var(--text); }
-.sidebar-footer .btn.icon.on { background: none; border-color: transparent; color: var(--brand); }
+/* icon rail: macOS traffic lights sit above its icons (window has no title bar) */
+.rail { width: 52px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 52px 0 10px; background: var(--surface); border-right: 1px solid var(--line); }
+.rail .btn.icon { width: 34px; height: 34px; background: none; border-color: transparent; box-shadow: none; color: var(--dim); }
+.rail .btn.icon:hover { color: var(--text); background: var(--hover); }
+.rail .btn.icon.on { color: var(--brand); background: var(--hover); }
+.rail-bottom { margin-top: auto; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.update { position: relative; }
+.update::after { content: ""; position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
 .main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 .main > .settings { padding: 24px; overflow-y: auto; }
 

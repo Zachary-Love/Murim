@@ -5,12 +5,14 @@ import Settings from "./Settings";
 import Caffeine from "./Caffeine";
 import Updater from "./Updater";
 import { Item, Repo, Session, Mode, AgentKind, LogEntry, PrMap, SEV, OVERALL, sortItems, stage } from "./types";
-import { StateIcon, AgentIcon, PrIcon, GearIcon, FlameIcon } from "./Icons";
+import { StateIcon, AgentIcon, PrIcon, GearIcon, FlameIcon, TasksIcon, ReviewsIcon } from "./Icons";
 import TaskPane from "./TaskPane";
 import logo from "./assets/logo-mark.svg";
 
 type Payload = { items: Item[]; error: string | null };
 type PrPayload = { prs: PrMap; error?: string | null };
+type View = "tasks" | "reviews";
+const savedView = (): View => { try { return localStorage.getItem("murim.view") === "reviews" ? "reviews" : "tasks"; } catch { return "tasks"; } };
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false);
@@ -23,6 +25,9 @@ export default function App() {
   const [prErr, setPrErr] = useState<string | null>(null);
   const [logs, setLogs] = useState<Record<string, LogEntry[]>>({});
   const [open, setOpen] = useState<string | null>(null);
+  const [view, setView] = useState<View>(savedView);
+  const [openReview, setOpenReview] = useState<string | null>(null); // a ReviewPr.key; set by the review list (Task 6)
+  const switchView = (v: View) => { setView(v); setShowSettings(false); try { localStorage.setItem("murim.view", v); } catch {} };
   useEffect(() => {
     invoke<Record<string, Session>>("get_sessions").then(setSessions).catch(() => {});
     const us = listen<Record<string, Session>>("sessions-updated", (e) => setSessions(e.payload));
@@ -46,11 +51,21 @@ export default function App() {
 
   return (
     <div className="app">
+      <nav className="rail" data-tauri-drag-region>
+        <button className={`btn icon ${view === "tasks" ? "on" : ""}`} title="Tasks" onClick={() => switchView("tasks")}><TasksIcon /></button>
+        <button className={`btn icon ${view === "reviews" ? "on" : ""}`} title="Reviews" onClick={() => switchView("reviews")}><ReviewsIcon /></button>
+        <div className="rail-bottom">
+          <Updater />
+          <Caffeine />
+          <button className={`btn icon ${showSettings ? "on" : ""}`} title="Settings" onClick={() => setShowSettings(!showSettings)}><GearIcon /></button>
+        </div>
+      </nav>
       <aside className="sidebar">
         <header className="brand" data-tauri-drag-region>
           <h1 data-tauri-drag-region><img className="logo" src={logo} alt="" />Murim</h1>
-          <button className="btn icon" title="Refresh tasks" onClick={() => invoke("refresh_inbox")}>↻</button>
+          <button className="btn icon" title={`Refresh ${view}`} onClick={() => invoke(view === "tasks" ? "refresh_inbox" : "refresh_reviews").catch(() => {})}>↻</button>
         </header>
+        {view === "reviews" ? <div className="section-label">Reviews</div> : <>
         <div className="section-label">My tasks <span className="count">{p.items.length}</span></div>
         {p.error && <div className="banner">{p.error}</div>}
         {prErr && <div className="banner">{prErr}</div>}
@@ -73,14 +88,12 @@ export default function App() {
           })}
           {!p.items.length && <li className="empty">No tasks in your active cycle</li>}
         </ul>
-        <footer className="sidebar-footer">
-          <Updater />
-          <Caffeine />
-          <button className={`btn icon ${showSettings ? "on" : ""}`} title="Settings" onClick={() => setShowSettings(!showSettings)}><GearIcon /></button>
-        </footer>
+        </>}
       </aside>
       <main className="main">
-        {showSettings ? <Settings /> : openItem ? (
+        {showSettings ? <Settings /> : view === "reviews" ? (
+          <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Select a pull request to review.</p></div>
+        ) : openItem ? (
           <TaskPane key={openItem.issue.id} item={openItem} session={sessions[openItem.issue.id]} pr={prs[openItem.issue.id]} log={logs[openItem.issue.id] ?? []} repos={repos} defaultMode={mode} agent={agent} />
         ) : <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Select a task to start working on it.</p></div>}
       </main>

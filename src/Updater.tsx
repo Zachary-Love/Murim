@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { check, Update } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { DownloadIcon } from "./Icons";
 
 export default function Updater() {
   const [update, setUpdate] = useState<Update | null>(null);
@@ -28,8 +29,8 @@ export default function Updater() {
     }
   };
   return (
-    <button className="btn ghost" disabled={!!status && !status.startsWith("Update failed")} title={status} onClick={install}>
-      {status || `Update to v${update.version}`}
+    <button className="btn icon update" disabled={!!status && !status.startsWith("Update failed")} title={status || `Update to v${update.version}`} onClick={install}>
+      <DownloadIcon />
     </button>
   );
 }
