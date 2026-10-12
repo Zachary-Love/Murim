@@ -8,6 +8,7 @@ mod hooks;
 mod sessions;
 mod tempering;
 mod review;
+mod reviews;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
