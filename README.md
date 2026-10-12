@@ -4,8 +4,8 @@ One pane of glass for AI feature development. Murim pulls your Linear issues and
 list, puts Claude Code to work on a task with one button, and babysits the PR to merge.
 
 - **Tasks** — your assigned issues in the active Linear cycle, each matched to a local repo.
-- **Start Claude** — creates a git worktree on the issue's branch and runs the real `claude` CLI in it.
-  It works in the background; you're notified only when Claude has a question.
+- **Start agent** — creates a git worktree on the issue's branch and runs your coding agent in it, with extra
+  terminal tabs if you want them. With Claude Code it works in the background and you're notified only when it has a question.
 - **Draft PR review** — after a quality pass, Claude opens a draft PR with its own title and description.
   You review the diff in Murim, then accept (marks it ready for review) or send changes back to Claude.
 - **Tempering** — watches CI, review comments and merge conflicts, and invokes Claude only when there's work.
@@ -39,6 +39,16 @@ pnpm tauri build        # release .app / .dmg
 
 Open Settings (gear, bottom left), set the repos folder, paste your Linear key, save.
 Issues are matched to repos by a label equal to the repo name; you can always pick the repo by hand.
+
+## Agents
+
+Settings → Agent picks what **Start agent** runs:
+
+- **Claude Code** (default) — full automation: status and question relay via Claude Code hooks, the quality pass and
+  draft PR, and Tempering.
+- **Custom command** — any CLI agent (`codex`, `gemini`, `aider --yes`, …). It runs in the worktree terminal through
+  your login shell with the issue as its last argument. You get the terminal, extra terminals, the Review tab and
+  Accept PR; question relay, the automatic quality pass and Tempering need Claude Code's hooks, so they're off.
 
 ## How it works
 

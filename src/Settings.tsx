@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { MODE_LABEL } from "./types";
+import { MODE_LABEL, AgentKind } from "./types";
 
-type S = { repos_root: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean };
+type S = { agent: AgentKind; agent_command: string; repos_root: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean };
 
 export default function Settings() {
   const [s, setS] = useState<S | null>(null);
@@ -44,15 +44,33 @@ export default function Settings() {
           }}>Choose…</button>
         </div>
       </label>
-      <label>Default Claude permission mode
+      <label>Agent
+        <select value={s.agent} onChange={(e) => setS({ ...s, agent: e.target.value as AgentKind })}>
+          <option value="claude">Claude Code (full automation)</option>
+          <option value="custom">Custom command</option>
+        </select>
+      </label>
+      {s.agent === "custom" && (
+        <>
+          <label>Command
+            <input className="mono" value={s.agent_command} placeholder="e.g. codex, gemini, aider --yes" onChange={(e) => setS({ ...s, agent_command: e.target.value })} />
+          </label>
+          <p className="muted">Runs in the task's worktree through your login shell, with the issue as the last argument.
+            Custom agents get the terminal, extra terminals, the Review tab and Accept PR, but not question relay,
+            the automatic quality pass and draft PR, or Tempering — those rely on Claude Code's hooks.</p>
+        </>
+      )}
+      {s.agent === "claude" && <>
+      <label>Default permission mode
         <select value={s.default_permission_mode}
           onChange={(e) => setS({ ...s, default_permission_mode: e.target.value as S["default_permission_mode"] })}>
           {(Object.keys(MODE_LABEL) as S["default_permission_mode"][]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
         </select>
       </label>
       {s.default_permission_mode === "skip" && (
-        <p className="warn">Bypass permissions runs Claude with --dangerously-skip-permissions: no prompts for any tool.</p>
+        <p className="warn">Bypass permissions runs Claude Code with --dangerously-skip-permissions: no prompts for any tool.</p>
       )}
+      </>}
       <label>Linear API key {hasKey && <span className="chip green">saved</span>}
         <input type="password" value={key} placeholder={hasKey ? "enter to replace" : ""}
           onChange={(e) => setKey(e.target.value)} />

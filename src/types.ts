@@ -4,10 +4,11 @@ export type Item = {
   resolving: boolean;
 };
 export type Mode = "normal" | "allowlist" | "skip";
+export type AgentKind = "claude" | "custom";
 // Claude Code's own names for what each mode passes to `claude`.
 export const MODE_LABEL: Record<Mode, string> = { normal: "Ask permissions", allowlist: "Accept edits + dev tools", skip: "Bypass permissions" };
 export type Status = "starting" | "working" | "needsInput" | "idle" | "ended";
-export type Session = { issueId: string; worktree: string; sessionId: string | null; status: Status; questions: unknown; ptyAlive: boolean; permissionMode: Mode; tempering?: boolean; replyMode?: ReplyMode; escalations?: Escalation[]; prFlow?: string };
+export type Session = { issueId: string; worktree: string; sessionId: string | null; status: Status; questions: unknown; ptyAlive: boolean; permissionMode: Mode; tempering?: boolean; replyMode?: ReplyMode; escalations?: Escalation[]; prFlow?: string; agent?: AgentKind };
 export type ReplyMode = "off" | "terse" | "full";
 export type Escalation = { id: string; threadId: string; path: string; comment: string; reason: string };
 export type LogEntry = { issueId: string; at: number | string; message: string };
@@ -41,7 +42,7 @@ export const sortItems = (a: Item[], m: Record<string, Session>, prs: PrMap = {}
   });
 export const repoName = (i: Item) => i.repo?.path.split("/").filter(Boolean).pop() ?? "";
 
-// The task's overall stage, from Linear state + Claude session + PR. Drives the sidebar status dot.
+// The task's overall stage, from Linear state + agent session + PR. Drives the sidebar status dot.
 export type Stage = "todo" | "progress" | "needsReview" | "codeReview" | "done";
 export const STAGE_LABEL: Record<Stage, string> = { todo: "Todo", progress: "In progress", needsReview: "Needs your review", codeReview: "In code review", done: "Done" };
 export const stage = (i: Item, s?: Session, pr?: PrHealth): Stage => {

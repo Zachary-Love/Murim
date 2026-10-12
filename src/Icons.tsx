@@ -25,10 +25,10 @@ export const StateIcon = ({ stage, backlog }: { stage: Stage; backlog?: boolean 
   );
 };
 
-export const ClaudeIcon = ({ status }: { status?: Status }) => {
-  if (status === "starting" || status === "working") return <i className="ico spin" title="Claude working" />;
-  if (status === "needsInput") return <i className="ico dot-input" title="Claude needs input" />;
-  if (status === "idle") return <i className="ico dot-idle" title="Claude idle" />;
+export const AgentIcon = ({ status }: { status?: Status }) => {
+  if (status === "starting" || status === "working") return <i className="ico spin" title="Agent working" />;
+  if (status === "needsInput") return <i className="ico dot-input" title="Agent needs input" />;
+  if (status === "idle") return <i className="ico dot-idle" title="Agent idle" />;
   return null;
 };
 

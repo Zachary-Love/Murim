@@ -5,14 +5,14 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import Terminal from "./Terminal";
 import IssueView from "./IssueView";
 import ReviewView from "./ReviewView";
-import { Item, Session, PrHealth, Repo, Mode, LABEL, OVERALL, SEV, STEP, LogEntry, MODE_LABEL } from "./types";
-import { ClaudeIcon, PrIcon } from "./Icons";
+import { Item, Session, PrHealth, Repo, Mode, LABEL, OVERALL, SEV, STEP, LogEntry, MODE_LABEL, AgentKind } from "./types";
+import { AgentIcon, PrIcon } from "./Icons";
 import logo from "./assets/logo-mark.svg";
 
 const prBadge = (p: PrHealth) => (
   <button className={`chip ${SEV[p.overall] ?? "grey"}`} title={`Open PR: ${p.title}`} onClick={() => openUrl(p.url)}><PrIcon color="" title="" />#{p.number} {OVERALL[p.overall] ?? p.overall} ↗</button>
 );
-type Tab = "issue" | "claude" | "review" | "pr";
+type Tab = "issue" | "agent" | "review" | "pr";
 
 // ponytail: questions shape is backend-defined JSON; accept {questions:[{question}]}, [{question}], or strings.
 const texts = (q: unknown): string[] => {
@@ -20,21 +20,21 @@ const texts = (q: unknown): string[] => {
   return (Array.isArray(a) ? a : []).map((x) => (typeof x === "string" ? x : (x as { question?: string })?.question ?? JSON.stringify(x)));
 };
 
-export default function TaskPane({ item, session, pr, log, repos, defaultMode }: { item: Item; session?: Session; pr?: PrHealth; log: LogEntry[]; repos: Repo[]; defaultMode: Mode }) {
-  const [tab, setTab] = useState<Tab>(session?.status === "needsInput" ? "claude" : (session?.prFlow === "awaitingReview" || session?.prFlow === "opened") ? "review" : "issue");
+export default function TaskPane({ item, session, pr, log, repos, defaultMode, agent }: { item: Item; session?: Session; pr?: PrHealth; log: LogEntry[]; repos: Repo[]; defaultMode: Mode; agent: AgentKind }) {
+  const [tab, setTab] = useState<Tab>(session?.status === "needsInput" ? "agent" : (session?.prFlow === "awaitingReview" || session?.prFlow === "opened") ? "review" : "issue");
   const [mode, setMode] = useState<Mode>(defaultMode);
   const [prompt, setPrompt] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [own, setOwn] = useState<string | null>(null); // escalation id with open textarea
   const [text, setText] = useState("");
-  const [term, setTerm] = useState("claude"); // "claude" or a shell id
+  const [term, setTerm] = useState("agent"); // "agent" or a shell id
   const [shells, setShells] = useState<string[]>([]);
   const id = item.issue.id;
   useEffect(() => {
     const load = () => invoke<string[]>("list_shells", { issueId: id }).then((v) => {
       setShells(v);
-      setTerm((t) => (t === "claude" || v.includes(t) ? t : "claude")); // closed/exited shell falls back to Claude
+      setTerm((t) => (t === "agent" || v.includes(t) ? t : "agent")); // closed/exited shell falls back to the agent
     }).catch(() => {});
     load();
     const un = listen("shells-changed", load);
@@ -52,25 +52,27 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
   };
   const qs = session?.status === "needsInput" ? texts(session.questions) : [];
   const alive = !!session?.ptyAlive;
-  const start = () => run("start_task", { permissionMode: mode }).then(() => setTab("claude"));
-  const resume = () => run("resume_task", { prompt: prompt || null }).then(() => setTab("claude"));
+  // a running session keeps the agent it started with; otherwise Settings decides what Start launches
+  const custom = (session?.agent ?? agent) === "custom";
+  const start = () => run("start_task", { permissionMode: mode }).then(() => setTab("agent"));
+  const resume = () => run("resume_task", { prompt: prompt || null }).then(() => setTab("agent"));
   const pickRepo = !item.repo || item.repo.source === "semantic" || item.repo.source === "claude";
   const T = ({ id, children }: { id: Tab; children: ReactNode }) => <button className={tab === id ? "on" : ""} onClick={() => setTab(id)}>{children}</button>;
-  const showTerm = (t: string) => { setTerm(t); setTab("claude"); };
+  const showTerm = (t: string) => { setTerm(t); setTab("agent"); };
   const addShell = () => invoke<string>("open_shell", { issueId: id }).then((t) => { setShells((v) => [...v, t]); showTerm(t); setErr(""); }).catch((e) => setErr(String(e)));
   return (
     <div className="pane">
       <header className="topbar">
         <nav className="seg">
           <T id="issue">Issue</T>
-          <T id="claude">Claude<ClaudeIcon status={session?.status} /></T>
+          <T id="agent">Agent<AgentIcon status={session?.status} /></T>
           {session && <T id="review">Review{(session.prFlow === "awaitingReview" || session.prFlow === "opened") && <span className="count attn">1</span>}</T>}
           <T id="pr">PR{pr && ` #${pr.number}`}{!!session?.escalations?.length && <span className="count">{session.escalations.length}</span>}</T>
         </nav>
         <div className="topbar-right">
           <button className="chip mono" title="Open in Linear" onClick={() => openUrl(item.issue.url)}>{item.issue.identifier} ↗</button>
           <h2 className="pane-title" title={item.issue.title}>{item.issue.title}</h2>
-          {session && <span className={`chip status ${session.status}`}><ClaudeIcon status={session.status} />{LABEL[session.status]}</span>}
+          {session && <span className={`chip status ${session.status}`}><AgentIcon status={session.status} />{LABEL[session.status]}</span>}
           {session && <span className="chip step">{STEP[session.prFlow ?? "none"] ?? "Implementing"}</span>}
           {pr && prBadge(pr)}
           {item.resolving && <span className="chip">Matching repo…</span>}
@@ -81,25 +83,27 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
             </select>
           )}
           {alive ? (
-            <button className="btn danger" onClick={() => run("stop_task")}>■ Stop Claude</button>
+            <button className="btn danger" onClick={() => run("stop_task")}>■ Stop agent</button>
           ) : (
             <>
-              <select value={mode} title="Claude Code permission mode" className={mode === "skip" ? "warn" : ""} onChange={(e) => setMode(e.target.value as Mode)}>
-                {(Object.keys(MODE_LABEL) as Mode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
-              </select>
-              <button className={`btn ${session ? "" : "primary"}`} disabled={!item.repo} title={item.repo ? (session ? "Start a fresh Claude conversation in this worktree" : "") : "Pick a repo first"} onClick={start}>{session ? "New session" : "Start Claude"}</button>
+              {!custom && (
+                <select value={mode} title="Claude Code permission mode" className={mode === "skip" ? "warn" : ""} onChange={(e) => setMode(e.target.value as Mode)}>
+                  {(Object.keys(MODE_LABEL) as Mode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
+                </select>
+              )}
+              <button className={`btn ${session ? "" : "primary"}`} disabled={!item.repo} title={item.repo ? (session ? "Start a fresh agent session in this worktree" : "") : "Pick a repo first"} onClick={start}>{session ? "New session" : "Start agent"}</button>
             </>
           )}
           {session && !alive && (
             <>
               <input placeholder="Follow-up prompt (optional)" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-              <button className={`btn ${session.prFlow === "awaitingReview" ? "" : "primary"}`} onClick={resume}>↻ Resume Claude</button>
+              <button className={`btn ${session.prFlow === "awaitingReview" ? "" : "primary"}`} onClick={resume}>↻ Resume agent</button>
             </>
           )}
-          {pr && session && (
+          {pr && session && !custom && (
             <>
               <button className={`btn toggle ${session.tempering ? "on" : ""}`} title="Babysit the PR: rerun CI, fix failures, answer reviews" onClick={() => run("set_tempering", { on: !session.tempering })}>🔥 Tempering {session.tempering ? "on" : "off"}</button>
-              <select value={session.replyMode ?? "terse"} title="How Claude replies to review comments" onChange={(e) => run("set_reply_mode", { mode: e.target.value })}>
+              <select value={session.replyMode ?? "terse"} title="How the agent replies to review comments" onChange={(e) => run("set_reply_mode", { mode: e.target.value })}>
                 <option value="off">Replies: off</option>
                 <option value="terse">Replies: terse</option>
                 <option value="full">Replies: full</option>
@@ -109,24 +113,24 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
         </div>
       </header>
       <div className="tabbar">
-        <button className={`tab ${tab === "claude" && term === "claude" ? "on" : ""}`} onClick={() => showTerm("claude")}>Claude<ClaudeIcon status={session?.status} /></button>
+        <button className={`tab ${tab === "agent" && term === "agent" ? "on" : ""}`} onClick={() => showTerm("agent")}>Agent<AgentIcon status={session?.status} /></button>
         {shells.map((t, n) => (
-          <span key={t} className={`tab ${tab === "claude" && term === t ? "on" : ""}`}>
+          <span key={t} className={`tab ${tab === "agent" && term === t ? "on" : ""}`}>
             <button onClick={() => showTerm(t)}>Terminal {n + 1}</button>
             <button className="x" title="Close terminal" onClick={() => invoke("close_shell", { id: t })}>×</button>
           </span>
         ))}
-        <button className="tab add" title={session ? "New terminal in this task's worktree" : "Start Claude first: the task has no worktree yet"} disabled={!session} onClick={addShell}>+</button>
+        <button className="tab add" title={session ? "New terminal in this task's worktree" : "Start the agent first: the task has no worktree yet"} disabled={!session} onClick={addShell}>+</button>
       </div>
       {err && <div className="banner">{err}</div>}
       {tab === "issue" && <IssueView issueId={id} />}
-      {tab === "review" && session && <ReviewView issueId={id} refreshKey={`${session.prFlow}:${session.status}`} onRequested={() => setTab("claude")} />}
-      {tab === "claude" && term !== "claude" && <Terminal key={term} issueId={term} />}
-      {tab === "claude" && term === "claude" && (
+      {tab === "review" && session && <ReviewView issueId={id} refreshKey={`${session.prFlow}:${session.status}`} onRequested={() => setTab("agent")} />}
+      {tab === "agent" && term !== "agent" && <Terminal key={term} issueId={term} />}
+      {tab === "agent" && term === "agent" && (
         <>
           {qs.length > 0 && (
             <div className="question">
-              <div className="q-head">Claude is asking — answer in the terminal below</div>
+              <div className="q-head">The agent is asking — answer in the terminal below</div>
               {qs.map((q, n) => <div key={n}>{q}</div>)}
             </div>
           )}
@@ -134,17 +138,17 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
             // ponytail: no PTY means nothing to type into; show how to launch instead of a dead xterm.
             <div className="empty-state">
               <img className="logo-lg" src={logo} alt="" />
-              <p>{session ? "Claude isn't running for this task." : "Claude hasn't been started for this task."}</p>
+              <p>{session ? "The agent isn't running for this task." : "The agent hasn't been started for this task."}</p>
               {!item.repo ? <p className="muted">Pick a repo first.</p> : session
-                ? <button className={`btn ${session.prFlow === "awaitingReview" ? "" : "primary"}`} onClick={resume}>↻ Resume Claude</button>
-                : <button className="btn primary" onClick={start}>Start Claude · {MODE_LABEL[mode]}</button>}
+                ? <button className={`btn ${session.prFlow === "awaitingReview" ? "" : "primary"}`} onClick={resume}>↻ Resume agent</button>
+                : <button className="btn primary" onClick={start}>Start agent{custom ? "" : ` · ${MODE_LABEL[mode]}`}</button>}
             </div>
           )}
         </>
       )}
       {tab === "pr" && (
         <div className="prtab">
-          {!pr && <p className="empty-state">No pull request yet. Claude opens a draft PR when it finishes.</p>}
+          {!pr && <p className="empty-state">No pull request yet. The agent opens a draft PR when it finishes.</p>}
           {pr && (
             <section className={`card ${SEV[pr.overall] ?? "grey"}`}>
               <div className="card-head">
@@ -162,13 +166,13 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
           )}
           {pr && session && (session.escalations ?? []).map((x) => (
             <section key={x.id} className="card amber">
-              <div className="q-head">Claude disagrees with a review comment</div>
+              <div className="q-head">The agent disagrees with a review comment</div>
               <div className="meta mono">{x.path}</div>
               <blockquote>{x.comment}</blockquote>
               <p>{x.reason}</p>
               <div className="group">
                 <button className="btn primary" disabled={busy} onClick={() => resolve(x.id, "doIt")}>Do it anyway</button>
-                <button className="btn" disabled={busy} onClick={() => resolve(x.id, "postPushback")}>Post Claude's pushback</button>
+                <button className="btn" disabled={busy} onClick={() => resolve(x.id, "postPushback")}>Post the agent's pushback</button>
                 <button className={`btn ${own === x.id ? "on" : ""}`} disabled={busy} onClick={() => setOwn(own === x.id ? null : x.id)}>Write my own reply</button>
                 <button className="btn ghost" disabled={busy} onClick={() => resolve(x.id, "ignore")}>Ignore</button>
               </div>

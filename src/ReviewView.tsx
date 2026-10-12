@@ -41,7 +41,7 @@ export default function ReviewView({ issueId, refreshKey, onRequested }: { issue
   return (
     <div className="issue review">
       <section className="card">
-        <div className="q-head">{r.pr ? "Claude's draft pull request" : "No PR yet"}</div>
+        <div className="q-head">{r.pr ? "Draft pull request" : "No PR yet"}</div>
         {r.pr ? (
           <>
             <div className="card-head">
@@ -50,8 +50,8 @@ export default function ReviewView({ issueId, refreshKey, onRequested }: { issue
             </div>
             <div className="pr-body">{r.pr.body ? <Markdown text={r.pr.body} /> : <p className="empty">No description</p>}</div>
           </>
-        ) : <p className="muted">Claude opens a draft PR with its own title and description after the quality pass.</p>}
-        {dirty && <div className="banner">{r.uncommitted.length ? `${r.uncommitted.length} uncommitted file${r.uncommitted.length === 1 ? "" : "s"}` : `${r.unpushed > 1e9 ? "Branch not pushed" /* backend: no upstream = usize::MAX */ : `${r.unpushed} unpushed commit${r.unpushed === 1 ? "" : "s"}`}`}: the PR doesn't include everything yet. Ask Claude to commit and push.</div>}
+        ) : <p className="muted">The agent opens a draft PR with its own title and description when it finishes.</p>}
+        {dirty && <div className="banner">{r.uncommitted.length ? `${r.uncommitted.length} uncommitted file${r.uncommitted.length === 1 ? "" : "s"}` : `${r.unpushed > 1e9 ? "Branch not pushed" /* backend: no upstream = usize::MAX */ : `${r.unpushed} unpushed commit${r.unpushed === 1 ? "" : "s"}`}`}: the PR doesn't include everything yet. Ask the agent to commit and push.</div>}
         {err && <div className="banner">{err}</div>}
         {r.pr?.isDraft && (
           <div className="group">
@@ -60,9 +60,9 @@ export default function ReviewView({ issueId, refreshKey, onRequested }: { issue
           </div>
         )}
         <div className="reply">
-          <textarea value={ask} placeholder="Request changes from Claude…" onChange={(e) => setAsk(e.target.value)} />
+          <textarea value={ask} placeholder="Request changes from the agent…" onChange={(e) => setAsk(e.target.value)} />
           <button className="btn" disabled={busy || !ask.trim()} onClick={() => act("request_changes", { text: ask }, () => { setAsk(""); onRequested(); })}>
-            Send to Claude
+            Send to agent
           </button>
         </div>
       </section>

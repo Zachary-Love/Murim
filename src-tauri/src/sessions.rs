@@ -1,5 +1,5 @@
 use crate::hooks::{self, Hooks, PrFlow, Status, StopOutcome};
-use crate::settings::{self, PermissionMode};
+use crate::settings::{self, AgentKind, PermissionMode};
 use crate::tempering::{Escalation, Memory, ReplyMode};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -36,6 +36,11 @@ pub struct SessionInfo {
     pub memory: Memory,
     #[serde(default)]
     pub pr_flow: PrFlow,
+    /// agent this session was started with (custom command captured so Resume reruns the same one)
+    #[serde(default)]
+    pub agent: AgentKind,
+    #[serde(default)]
+    pub agent_command: String,
     /// set when tempering resumes the session; cleared on the next Stop
     #[serde(skip)]
     pub tempering_turn: bool,
@@ -308,21 +313,31 @@ fn flags(m: PermissionMode) -> Vec<&'static str> {
 }
 
 fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), String> {
-    let (wt, mode) = {
+    let (wt, mode, agent, cmd) = {
         let g = sessions(app).0.lock().unwrap();
         let s = g.map.get(issue_id).ok_or("unknown session")?;
         if g.ptys.contains_key(issue_id) {
             return Err("already running".into());
         }
-        (s.worktree.clone(), s.permission_mode)
+        (s.worktree.clone(), s.permission_mode, s.agent, s.agent_command.clone())
     };
+    let custom = agent == AgentKind::Custom;
     let (vars, claude) = shell_env();
-    let claude = claude.clone().or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.local/bin/claude")).filter(|p| Path::new(p).exists())).ok_or("claude not found on PATH (login shell)")?;
     let hk = app.state::<Hooks>();
     let pair = native_pty_system().openpty(PtySize { rows: 40, cols: 120, pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string())?;
-    let mut c = CommandBuilder::new(claude);
-    c.args(head);
-    c.args(flags(mode));
+    let mut c = if custom {
+        // user's command line via their login shell; the prompt goes in as "$@" so it is never shell-parsed
+        let mut c = CommandBuilder::new(std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into()));
+        c.args(["-lc", &format!("{cmd} \"$@\""), "murim"]);
+        c.args(head);
+        c
+    } else {
+        let claude = claude.clone().or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.local/bin/claude")).filter(|p| Path::new(p).exists())).ok_or("claude not found on PATH (login shell)")?;
+        let mut c = CommandBuilder::new(claude);
+        c.args(head);
+        c.args(flags(mode));
+        c
+    };
     for (k, _) in std::env::vars() {
         if k.starts_with("CLAUDE") || k == "AI_AGENT" {
             c.env_remove(k);
@@ -346,7 +361,8 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
         g.ptys.insert(issue_id.into(), Pty { gen: g.gen, writer, master: pair.master, child });
         g.bufs.insert(issue_id.into(), VecDeque::new());
         let s = g.map.get_mut(issue_id).unwrap();
-        (s.pty_alive, s.status, s.questions) = (true, Status::Starting, None);
+        // no hooks for custom agents: "working" for as long as the process runs
+        (s.pty_alive, s.status, s.questions) = (true, if custom { Status::Working } else { Status::Starting }, None);
         g.gen
     });
     let (app, id) = (app.clone(), issue_id.to_string());
@@ -366,7 +382,7 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
             let _ = app.emit("pty-output", json!({"issueId": id, "data": B64.encode(&buf[..n])}));
             // dialog detection over a rolling window so a phrase split across reads still matches
             tail.push_str(&squash(&String::from_utf8_lossy(&buf[..n])));
-            if !trusted && (tail.contains("trustthisfolder") || tail.contains("doyoutrust")) {
+            if !custom && !trusted && (tail.contains("trustthisfolder") || tail.contains("doyoutrust")) {
                 trusted = true;
                 let (a, i) = (app.clone(), id.clone());
                 std::thread::spawn(move || {
@@ -378,7 +394,7 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
                     let _ = write_pty(&a, &i, b"\r");
                 });
             }
-            if !bypass && tail.contains("yesiaccept") {
+            if !custom && !bypass && tail.contains("yesiaccept") {
                 // never auto-accept bypass-permissions: surface it to the user
                 bypass = true;
                 let note = update(&app, |g| {
@@ -496,16 +512,22 @@ pub fn start_task(app: AppHandle, issue_id: String, permission_mode: PermissionM
     let branch = if i.branch_name.is_empty() { i.identifier.to_lowercase() } else { i.branch_name.clone() };
     let repo = Path::new(&repo.path);
     let home = PathBuf::from(std::env::var("HOME").map_err(|e| e.to_string())?);
+    let cfg = settings::load(&settings::dir(&app)?);
+    let custom = cfg.agent == AgentKind::Custom;
+    if custom && cfg.agent_command.trim().is_empty() {
+        return Err("Set the agent command in Settings".into());
+    }
     let wt = ensure_worktree(&home, repo, &i.identifier, &branch)?;
     write_hooks(&wt)?;
     exclude_settings(repo)?;
-    let prompt = format!("Work on Linear issue {}: {}\n{}\n\n{}{DONE_SUFFIX}", i.identifier, i.title, i.url, i.description);
+    // the MURIM_DONE marker drives Claude's hook-based flow; custom agents just get the issue
+    let prompt = format!("Work on Linear issue {}: {}\n{}\n\n{}{}", i.identifier, i.title, i.url, i.description, if custom { "" } else { DONE_SUFFIX });
     update(&app, |g| {
         if g.ptys.contains_key(&issue_id) {
             return Err("already running".to_string());
         }
         let old = g.map.get(&issue_id).cloned();
-        g.map.insert(issue_id.clone(), SessionInfo { issue_id: issue_id.clone(), worktree: wt.to_string_lossy().into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode, tempering: old.as_ref().is_some_and(|o| o.tempering), reply_mode: old.as_ref().map(|o| o.reply_mode).unwrap_or_default(), escalations: vec![], pr_flow: old.as_ref().map(|o| o.pr_flow).unwrap_or_default(), tempering_turn: false, memory: old.map(|o| o.memory).unwrap_or_default() });
+        g.map.insert(issue_id.clone(), SessionInfo { issue_id: issue_id.clone(), worktree: wt.to_string_lossy().into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode, tempering: !custom && old.as_ref().is_some_and(|o| o.tempering), reply_mode: old.as_ref().map(|o| o.reply_mode).unwrap_or_default(), escalations: vec![], pr_flow: old.as_ref().map(|o| o.pr_flow).unwrap_or_default(), agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), tempering_turn: false, memory: old.map(|o| o.memory).unwrap_or_default() });
         Ok(())
     })?;
     spawn(&app, &issue_id, vec![prompt])
@@ -514,9 +536,10 @@ pub fn start_task(app: AppHandle, issue_id: String, permission_mode: PermissionM
 #[tauri::command]
 pub fn resume_task(app: AppHandle, issue_id: String, prompt: Option<String>) -> Result<(), String> {
     let prompt = prompt.filter(|p| !p.is_empty());
-    let (alive, sid) = {
+    let (alive, sid, agent) = {
         let g = sessions(&app).0.lock().unwrap();
-        (g.ptys.contains_key(&issue_id), g.map.get(&issue_id).ok_or("unknown session")?.session_id.clone())
+        let s = g.map.get(&issue_id).ok_or("unknown session")?;
+        (g.ptys.contains_key(&issue_id), s.session_id.clone(), s.agent)
     };
     if alive {
         if let Some(p) = prompt {
@@ -525,6 +548,10 @@ pub fn resume_task(app: AppHandle, issue_id: String, prompt: Option<String>) -> 
             write_pty(&app, &issue_id, b"\r")?;
         }
         return Ok(());
+    }
+    if agent == AgentKind::Custom {
+        // ponytail: no generic resume; rerun the command in the worktree with the follow-up (if any)
+        return spawn(&app, &issue_id, prompt.into_iter().collect());
     }
     let mut head = vec!["--resume".to_string(), sid.ok_or("no session id to resume")?];
     head.extend(prompt);

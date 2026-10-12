@@ -11,9 +11,22 @@ pub enum PermissionMode {
     Skip,
 }
 
+/// Which coding agent runs a task. Claude Code gets full automation via its hooks; a custom command
+/// (codex, gemini, aider, …) runs in the same terminal without status, questions, quality pass or Tempering.
+#[derive(Serialize, Deserialize, Default, Clone, Copy, PartialEq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum AgentKind {
+    #[default]
+    Claude,
+    Custom,
+}
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
 #[serde(default)]
 pub struct Settings {
+    pub agent: AgentKind,
+    /// Shell command for a custom agent; the task prompt is appended as its last argument.
+    pub agent_command: String,
     /// Folder holding the user's repos; empty until they choose one (no guessed default).
     pub repos_root: String,
     pub default_permission_mode: PermissionMode,
@@ -77,7 +90,7 @@ mod tests {
         let d = std::env::temp_dir().join(format!("murim-settings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         assert_eq!(load(&d), Settings::default()); // missing
-        let s = Settings { repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, repo_map: [("bug".to_string(), "/r".to_string())].into() };
+        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, repo_map: [("bug".to_string(), "/r".to_string())].into() };
         save(&d, &s).unwrap();
         assert_eq!(load(&d), s);
         std::fs::write(d.join("settings.json"), "{not json").unwrap();

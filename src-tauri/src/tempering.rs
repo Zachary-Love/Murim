@@ -371,6 +371,9 @@ pub fn run(app: &AppHandle, id: &str, d: &PrDetail, h: &PrHealth) {
 
 #[tauri::command]
 pub fn set_tempering(app: AppHandle, issue_id: String, on: bool) -> Result<(), String> {
+    if on && sessions::with_session(&app, &issue_id, |s| s.agent) == Some(crate::settings::AgentKind::Custom) {
+        return Err("Tempering needs Claude Code's hooks; it isn't available for custom agents".into());
+    }
     let wt = sessions::with_session(&app, &issue_id, |s| {
         s.tempering = on;
         s.worktree.clone()
