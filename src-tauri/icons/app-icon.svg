@@ -1,16 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- generated from src/assets/logo.svg: macOS icon grid (412/512 rounded square), blade scaled 1.8x to read at small sizes -->
+  <!-- generated from src/assets/logo.svg without the glow (crisp at small sizes): macOS icon grid (412/512 rounded square), blade scaled 1.8x to read at small sizes -->
   <defs>
-    <!-- Soft Red Aura / Glow Filter -->
-    <filter id="bladeGlow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="12" result="blur1" />
-      <feGaussianBlur stdDeviation="24" result="blur2" />
-      <feMerge>
-        <feMergeNode in="blur2" />
-        <feMergeNode in="blur1" />
-        <feMergeNode in="SourceGraphic" />
-      </feMerge>
-    </filter>
 
     <!-- Linear Gradient for Blade Facets -->
     <linearGradient id="bladeMain" x1="0%" y1="100%" x2="100%" y2="0%">
@@ -35,9 +25,7 @@
   <g clip-path="url(#tile)">
     <g transform="translate(50 50) scale(0.8046875)">
       <rect width="512" height="512" fill="url(#bgLight)" />
-  <g transform="translate(251 250) scale(1.8) translate(-251 -250)"><g filter="url(#bladeGlow)">
-    <!-- Base Glow Underlay -->
-    <path d="M 180 340 L 310 200 L 322 160 L 305 185 Z" fill="#f43f5e" opacity="0.6" />
+  <g transform="translate(251 250) scale(1.8) translate(-251 -250)"><g>
 
     <!-- Left / Upper Facet -->
     <path d="M 180 340 L 310 200 L 322 160 Z" fill="url(#bladeHighlight)" />

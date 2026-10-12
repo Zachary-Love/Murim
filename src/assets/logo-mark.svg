@@ -1,16 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="150 130 200 240">
-  <!-- generated from src/assets/logo.svg: blade only, no background -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="170 150 162 200">
+  <!-- generated from src/assets/logo.svg without the glow (crisp at small sizes): blade only, no background -->
   <defs>
-    <!-- Soft Red Aura / Glow Filter -->
-    <filter id="bladeGlow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="12" result="blur1" />
-      <feGaussianBlur stdDeviation="24" result="blur2" />
-      <feMerge>
-        <feMergeNode in="blur2" />
-        <feMergeNode in="blur1" />
-        <feMergeNode in="SourceGraphic" />
-      </feMerge>
-    </filter>
 
     <!-- Linear Gradient for Blade Facets -->
     <linearGradient id="bladeMain" x1="0%" y1="100%" x2="100%" y2="0%">
@@ -31,9 +21,7 @@
       <stop offset="100%" stop-color="#f4f4f5" />
     </radialGradient>
   </defs>
-  <g filter="url(#bladeGlow)">
-    <!-- Base Glow Underlay -->
-    <path d="M 180 340 L 310 200 L 322 160 L 305 185 Z" fill="#f43f5e" opacity="0.6" />
+  <g>
 
     <!-- Left / Upper Facet -->
     <path d="M 180 340 L 310 200 L 322 160 Z" fill="url(#bladeHighlight)" />
