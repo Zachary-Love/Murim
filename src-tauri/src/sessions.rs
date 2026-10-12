@@ -311,7 +311,7 @@ fn merge_hooks(mut v: Value) -> Value {
     v
 }
 
-fn write_hooks(wt: &Path) -> Result<(), String> {
+pub(crate) fn write_hooks(wt: &Path) -> Result<(), String> {
     let f = wt.join(".claude/settings.local.json");
     let cur = std::fs::read_to_string(&f).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}));
     std::fs::create_dir_all(wt.join(".claude")).map_err(|e| e.to_string())?;
@@ -619,6 +619,33 @@ pub fn stop_task(app: AppHandle, issue_id: String) {
     if let Some(p) = sessions(&app).0.lock().unwrap().ptys.get_mut(&issue_id) {
         let _ = p.child.kill();
     }
+}
+
+/// Review-mode agent in a PR checkout. Same PTY/hook machinery as tasks, keyed `review:<owner>/<repo>/<n>`; no PR flow, no Tempering.
+pub fn start_review(app: &AppHandle, id: &str, wt: &str, prompt: String) -> Result<(), String> {
+    let cfg = settings::load(&settings::dir(app)?);
+    if cfg.agent == AgentKind::Custom && cfg.agent_command.trim().is_empty() {
+        return Err("Set the agent command in Settings".into());
+    }
+    update(app, |g| {
+        if g.ptys.contains_key(id) {
+            return Err("already running".to_string());
+        }
+        g.map.insert(id.into(), SessionInfo { issue_id: id.into(), worktree: wt.into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode: cfg.default_permission_mode, tempering: false, escalations: vec![], memory: Default::default(), pr_flow: PrFlow::None, agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), tempering_turn: false });
+        Ok(())
+    })?;
+    spawn(app, id, vec![prompt])
+}
+
+/// Kill a session's PTY and drop it (review dismissed / PR closed).
+pub fn forget(app: &AppHandle, id: &str) {
+    update(app, |g| {
+        if let Some(mut p) = g.ptys.remove(id) {
+            let _ = p.child.kill();
+        }
+        g.map.remove(id);
+        g.bufs.remove(id);
+    });
 }
 
 #[tauri::command]

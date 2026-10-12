@@ -1,10 +1,12 @@
 //! Review mode: other people's PRs (GitHub review requests + the team's Linear-linked PRs), authors as Linear users,
 //! and an agent that drafts a review in a detached checkout. Nothing is posted until the user clicks.
 use crate::github::{pr_node, Overall, PrHealth};
+use crate::sessions::{self, git};
 use crate::{github, linear};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -264,6 +266,19 @@ fn poll(app: &AppHandle) {
             p
         }
     };
+    // only a successful fetch can say a PR closed; offline must not wipe review checkouts
+    if p.error.is_none() {
+        let root = crate::settings::dir(app).map(|d| crate::settings::load(&d).repos_root).unwrap_or_default();
+        let ids: Vec<String> = sessions::get_sessions(app.state()).into_keys().collect();
+        for id in stale(&ids, &p.prs) {
+            sessions::forget(app, &id);
+            if let (Some((o, r, n)), Ok(h)) = (parse_session(&id), home()) {
+                if let Some(c) = find_clone(Path::new(&root), &o, &r) {
+                    let _ = remove_review_worktree(&c, &h.join(".murim/reviews").join(&r).join(n.to_string()), n);
+                }
+            }
+        }
+    }
     let st = app.state::<Reviews>();
     let mut cur = st.payload.lock().unwrap();
     if *cur != p {
@@ -292,6 +307,144 @@ pub fn refresh_reviews(state: State<Reviews>) {
     state.wake.1.notify_one();
 }
 
+/// Clone under repos_root whose origin is github.com/<owner>/<repo> (dir name doesn't matter).
+pub fn find_clone(root: &Path, owner: &str, repo: &str) -> Option<PathBuf> {
+    crate::repo_match::list_repos(root).into_iter().map(|r| PathBuf::from(r.path)).find(|p| {
+        git(p, &["remote", "get-url", "origin"]).ok().and_then(|u| github::parse_remote(&u))
+            .is_some_and(|(o, r)| o.eq_ignore_ascii_case(owner) && r.eq_ignore_ascii_case(repo))
+    })
+}
+
+/// Detached checkout of the PR head at ~/.murim/reviews/<repo>/<n>; re-running moves it to the latest head.
+pub fn ensure_review_worktree(home: &Path, clone: &Path, repo: &str, n: u64) -> Result<PathBuf, String> {
+    let r = format!("refs/murim/pr-{n}");
+    git(clone, &["fetch", "-q", "origin", &format!("+refs/pull/{n}/head:{r}")])?;
+    let _ = git(clone, &["fetch", "-q", "origin"]); // base branch for `git diff origin/<base>...HEAD`; best effort
+    let wt = home.join(".murim/reviews").join(repo).join(n.to_string());
+    if wt.exists() {
+        git(&wt, &["checkout", "-q", "--detach", "--force", &r])?;
+    } else {
+        std::fs::create_dir_all(wt.parent().unwrap()).map_err(|e| e.to_string())?;
+        git(clone, &["worktree", "add", "-q", "--detach", &wt.to_string_lossy(), &r])?;
+    }
+    Ok(wt)
+}
+
+pub fn remove_review_worktree(clone: &Path, wt: &Path, n: u64) -> Result<(), String> {
+    if wt.exists() {
+        git(clone, &["worktree", "remove", "--force", &wt.to_string_lossy()])?;
+    }
+    let _ = git(clone, &["update-ref", "-d", &format!("refs/murim/pr-{n}")]);
+    Ok(())
+}
+
+/// Review sessions whose PR is no longer in the (successfully fetched) open list.
+pub fn stale(session_ids: &[String], open: &[ReviewPr]) -> Vec<String> {
+    session_ids.iter().filter(|id| id.starts_with("review:") && !open.iter().any(|p| &p.session_id == *id)).cloned().collect()
+}
+
+fn review_prompt(p: &ReviewPr) -> String {
+    let who = match &p.author { Author::Linear { name, .. } => name.clone(), Author::Unlinked { login } => login.clone() };
+    format!("You are reviewing pull request {url} \"{title}\" by {who}. Its code is checked out here (detached HEAD); the base branch is origin/{base}. Read the change with `git diff origin/{base}...HEAD` and the surrounding code.\n\nDo NOT post to GitHub, comment, commit or push. Murim posts the review after the user approves it.\n\nWrite your review to .murim/review.json as JSON: {{\"summary\": string (markdown), \"event\": \"COMMENT\" | \"APPROVE\" | \"REQUEST_CHANGES\", \"comments\": [{{\"path\": string, \"line\": number (line in the new version of the file; must be inside the diff), \"body\": string}}]}}. Write the file in one go, then say it is ready.\n\nPR description:\n{body}",
+        url = p.health.url, title = p.health.title, base = p.base, body = p.body)
+}
+
+fn find(app: &AppHandle, key: &str) -> Result<ReviewPr, String> {
+    app.state::<Reviews>().payload.lock().unwrap().prs.iter().find(|p| p.key == key).cloned().ok_or_else(|| format!("{key} is no longer in the review list"))
+}
+
+fn home() -> Result<PathBuf, String> {
+    std::env::var("HOME").map(PathBuf::from).map_err(|e| e.to_string())
+}
+
+fn wt_of(p: &ReviewPr) -> Result<PathBuf, String> {
+    Ok(home()?.join(".murim/reviews").join(&p.repo).join(p.number.to_string()))
+}
+
+fn clone_of(app: &AppHandle, p: &ReviewPr) -> Result<PathBuf, String> {
+    let root = crate::settings::load(&crate::settings::dir(app)?).repos_root;
+    find_clone(Path::new(&root), &p.owner, &p.repo).ok_or_else(|| format!("Clone {}/{} under your repos folder first", p.owner, p.repo))
+}
+
+#[tauri::command]
+pub fn start_review_agent(app: AppHandle, key: String) -> Result<String, String> {
+    let p = find(&app, &key)?;
+    let clone = clone_of(&app, &p)?;
+    let wt = ensure_review_worktree(&home()?, &clone, &p.repo, p.number)?;
+    sessions::exclude_settings(&clone)?;
+    sessions::write_hooks(&wt)?;
+    std::fs::create_dir_all(wt.join(".murim")).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(wt.join(".murim/review.json")); // a re-run drafts afresh
+    sessions::start_review(&app, &p.session_id, &wt.to_string_lossy(), review_prompt(&p))?;
+    Ok(p.session_id)
+}
+
+#[tauri::command]
+pub fn get_review_draft(app: AppHandle, key: String) -> Result<Option<Draft>, String> {
+    let f = wt_of(&find(&app, &key)?)?.join(".murim/review.json");
+    match std::fs::read_to_string(&f) {
+        Err(_) => Ok(None),
+        Ok(s) => parse_draft(&s).map(Some).map_err(|e| format!("{e}\n\n{s}")),
+    }
+}
+
+#[tauri::command]
+pub fn post_review(app: AppHandle, key: String, draft: Draft) -> Result<(), String> {
+    let p = find(&app, &key)?;
+    let draft = parse_draft(&serde_json::to_string(&draft).map_err(|e| e.to_string())?)?; // same event validation as the file
+    let body = json!({
+        "body": draft.summary,
+        "event": draft.event,
+        "comments": draft.comments.iter().map(|c| json!({"path": c.path, "line": c.line, "side": "RIGHT", "body": c.body})).collect::<Vec<_>>(),
+    });
+    let f = std::env::temp_dir().join(format!("murim-review-{}-{}.json", p.repo, p.number));
+    std::fs::write(&f, body.to_string()).map_err(|e| e.to_string())?;
+    let r = crate::tempering::gh(&home()?.to_string_lossy(), &["api", "-X", "POST", &format!("repos/{}/{}/pulls/{}/reviews", p.owner, p.repo, p.number), "--input", &f.to_string_lossy()]);
+    let _ = std::fs::remove_file(&f);
+    r?;
+    refresh_reviews(app.state());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn dismiss_review(app: AppHandle, key: String) -> Result<(), String> {
+    let p = find(&app, &key)?;
+    sessions::forget(&app, &p.session_id);
+    remove_review_worktree(&clone_of(&app, &p)?, &wt_of(&p)?, p.number)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrDiff {
+    diff: String,
+    truncated: bool,
+}
+
+#[tauri::command]
+pub async fn get_pr_diff(app: AppHandle, key: String) -> Result<PrDiff, String> {
+    let url = find(&app, &key)?.health.url;
+    // gh is blocking and can be slow on big PRs: keep it off the async runtime
+    let mut diff = tauri::async_runtime::spawn_blocking(move || crate::tempering::gh(&home()?.to_string_lossy(), &["pr", "diff", &url, "--color", "never"]))
+        .await
+        .map_err(|e| e.to_string())??;
+    const MAX_DIFF: usize = 1_500_000; // same cap as review.rs
+    let truncated = diff.len() > MAX_DIFF;
+    if truncated {
+        let mut cut = MAX_DIFF;
+        while !diff.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        diff.truncate(cut);
+    }
+    Ok(PrDiff { diff, truncated })
+}
+
+/// "review:<owner>/<repo>/<n>" -> parts.
+fn parse_session(id: &str) -> Option<(String, String, u64)> {
+    let mut it = id.strip_prefix("review:")?.splitn(3, '/');
+    Some((it.next()?.into(), it.next()?.into(), it.next()?.parse().ok()?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,6 +469,8 @@ mod tests {
         assert_eq!(pr_url("https://github.com/o/r/issues/12"), None);
         assert_eq!(pr_url("https://linear.app/x"), None);
         assert_eq!(session_id("o", "r", 5), "review:o/r/5");
+        assert_eq!(parse_session("review:o/r/5"), Some(("o".into(), "r".into(), 5)));
+        assert_eq!(parse_session("issue-1"), None);
     }
 
     #[test]
@@ -383,5 +538,57 @@ mod tests {
         let mine = to_review(&node(2, "me", "y"), false).unwrap();
         let p = combine(Ok(("me".into(), vec![pr])), Ok(vec![mine])); // own PR dropped
         assert_eq!(p.prs.len(), 1);
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) -> String {
+        let o = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
+        assert!(o.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&o.stderr));
+        String::from_utf8_lossy(&o.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn review_worktree_tracks_pull_ref() {
+        let root = std::env::temp_dir().join(format!("murim-rev-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let up = root.join("up");
+        std::fs::create_dir_all(&up).unwrap();
+        git(&up, &["init", "-q", "-b", "main"]);
+        git(&up, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "base"]);
+        git(&up, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "pr1"]);
+        git(&up, &["update-ref", "refs/pull/1/head", "HEAD"]);
+        git(&root, &["clone", "-q", up.to_str().unwrap(), "clone"]);
+        let clone = root.join("clone");
+        let wt = ensure_review_worktree(&root, &clone, "clone", 1).unwrap();
+        assert_eq!(wt, root.join(".murim/reviews/clone/1"));
+        assert_eq!(git(&wt, &["rev-parse", "HEAD"]), git(&up, &["rev-parse", "refs/pull/1/head"]));
+        // PR gets a new commit: re-running moves the checkout
+        git(&up, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "pr1b"]);
+        git(&up, &["update-ref", "refs/pull/1/head", "HEAD"]);
+        ensure_review_worktree(&root, &clone, "clone", 1).unwrap();
+        assert_eq!(git(&wt, &["rev-parse", "HEAD"]), git(&up, &["rev-parse", "refs/pull/1/head"]));
+        remove_review_worktree(&clone, &wt, 1).unwrap();
+        assert!(!wt.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn find_clone_matches_origin() {
+        let root = std::env::temp_dir().join(format!("murim-clone-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let r = root.join("whatever-name");
+        std::fs::create_dir_all(&r).unwrap();
+        git(&r, &["init", "-q"]);
+        git(&r, &["remote", "add", "origin", "git@github.com:Acme/Widget.git"]);
+        assert_eq!(find_clone(&root, "acme", "widget"), Some(r.clone())); // case-insensitive, dir name irrelevant
+        assert_eq!(find_clone(&root, "acme", "other"), None);
+        assert_eq!(find_clone(&root.join("missing"), "acme", "widget"), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn stale_only_after_success() {
+        let open = vec![to_review(&node(1, "bob", "x"), true).unwrap()];
+        let ids = vec!["review:o/r/1".to_string(), "review:o/r/2".to_string(), "issue-abc".to_string()];
+        assert_eq!(stale(&ids, &open), vec!["review:o/r/2".to_string()]);
     }
 }
