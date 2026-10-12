@@ -41,12 +41,12 @@ fn main() {
         let (k, v) = s.split_once(':').unwrap_or((s, ""));
         eprintln!("{:.3} step {s}", ts());
         match k {
-            "spawn" => { let mut c = CommandBuilder::new("/Users/zacharylove/.local/bin/claude");
+            "spawn" => { let mut c = CommandBuilder::new("claude");
                 c.args(["--model","haiku"]); for x in v.split_whitespace(){c.arg(x)}
                 for (k,_) in std::env::vars() { if k.starts_with("CLAUDE") || k=="AI_AGENT" { c.env_remove(k); } } c.cwd(wt); c.env("PORT",port.to_string()); c.env("TOKEN",&token); c.env("TASK","task-1"); c.env("TERM","xterm-256color");
                 child = Some(pty.slave.spawn_command(c).unwrap()); }
             "spawnq" => { // spawn with a single quoted-free arg list split on '|'
-                let mut c = CommandBuilder::new("/Users/zacharylove/.local/bin/claude");
+                let mut c = CommandBuilder::new("claude");
                 c.args(["--model","haiku"]); for x in v.split('|'){c.arg(x)}
                 for (k,_) in std::env::vars() { if k.starts_with("CLAUDE") || k=="AI_AGENT" { c.env_remove(k); } } c.cwd(wt); c.env("PORT",port.to_string()); c.env("TOKEN",&token); c.env("TASK","task-1"); c.env("TERM","xterm-256color");
                 child = Some(pty.slave.spawn_command(c).unwrap()); }

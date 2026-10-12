@@ -139,13 +139,16 @@ fn by_claude(labels: &[String], title: &str, repos: &[Repo]) -> Option<RepoMatch
         labels.join(", "),
         names.join(", ")
     );
-    let mut cmd = Command::new("claude");
+    // Finder-launched apps don't have the shell PATH: use the login shell's claude + env, like sessions do.
+    let (vars, path) = crate::sessions::shell_env();
+    let mut cmd = Command::new(path.as_deref().unwrap_or("claude"));
     cmd.args(["-p", "--model", "haiku", &prompt]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     for (k, _) in std::env::vars() {
         if k.starts_with("CLAUDE") || k.starts_with("AI_AGENT") {
             cmd.env_remove(k);
         }
     }
+    cmd.envs(vars.iter().filter(|(k, _)| !(k.starts_with("CLAUDE") || k.starts_with("AI_AGENT"))).map(|(k, v)| (k, v)));
     let mut child = cmd.spawn().map_err(|e| eprintln!("claude spawn failed: {e}")).ok()?;
     let deadline = Instant::now() + Duration::from_secs(60);
     loop {
