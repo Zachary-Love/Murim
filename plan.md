@@ -270,6 +270,17 @@ Contract additions (serde camelCase):
 
 Each phase ends with one runnable check (Rust unit test for the rules/state derivation; manual run for UI).
 
+## Review mode
+
+Spec: [docs/specs/2026-10-12-review-mode-design.md](docs/specs/2026-10-12-review-mode-design.md).
+An icon rail switches the sidebar between Tasks and Reviews. `reviews.rs` polls GitHub (`review-requested:@me`) and
+Linear (team issues in a started state with PR attachments), drops the viewer's own PRs, resolves each author to a
+Linear user (attached issue's assignee > branch identifier's assignee > unlinked) and emits `reviews-updated`. Filters
+(author, status bucket) are applied in the UI (`src/reviewFilter.ts`) and saved as `review_filters` in Settings.
+Review with agent: detached checkout of `refs/murim/pr-<n>` under `~/.murim/reviews/<repo>/<n>`, session id
+`review:<owner>/<repo>/<n>`, the agent writes `.murim/review.json`; the pane edits it and `post_review` sends it via
+`gh api .../pulls/<n>/reviews` only on click. Checkouts are cleaned up on Dismiss or once GitHub reports the PR closed.
+
 ## Open questions
 
 None blocking. Revisit after the Phase 0 spike.

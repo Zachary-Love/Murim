@@ -9,6 +9,12 @@ list, puts Claude Code to work on a task with one button, and babysits the PR to
 - **Draft PR review** — after a quality pass, Claude opens a draft PR with its own title and description.
   You review the diff in Murim, then accept (marks it ready for review) or send changes back to Claude.
 - **Tempering** — watches CI, review comments and merge conflicts, and invokes Claude only when there's work.
+- **Reviews** — other people's open PRs: those requesting your review plus your Linear teams' in-progress issues with a
+  linked PR. Filter by author and status like in Linear; the author is the assignee of the linked Linear issue (or
+  of the issue named in the branch, e.g. `eng-123-fix`), else the PR shows under "Unlinked". Filters are remembered.
+  **Review with agent** checks the PR out in `~/.murim/reviews/<repo>/<n>` (the repo must be cloned under your repos
+  folder) and has your agent draft a review into `.murim/review.json`. You edit the summary, verdict and line comments in
+  Murim; nothing is posted to GitHub until you click Post. The checkout is removed on Dismiss or when the PR closes.
 - **Caffeine** — keeps the Mac awake while flows run.
 
 macOS only for now. Version 0.1.0 is early software.
@@ -70,6 +76,9 @@ See [plan.md](plan.md) for the design.
   Anyone who can comment on your PR can try to steer it. Prefer the **Ask permissions** or
   **Accept edits + dev tools** modes; **Bypass permissions** (`--dangerously-skip-permissions`) lets Claude run
   any command without asking, so use it only on repos and PRs where you trust every contributor.
+- **Review agents read untrusted code.** A PR's diff and description come from its author and can try to steer the
+  agent (for example, into running a script from the PR). The review agent starts in your default permission mode;
+  prefer **Ask permissions** for reviews. It is told not to post, and Murim only posts the draft when you click.
 - **Replies as you:** with Tempering replies on, Claude's replies to review comments are posted under your
   GitHub account. Set Review replies to Off in Settings to disable.
 
