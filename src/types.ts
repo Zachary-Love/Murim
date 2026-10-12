@@ -50,3 +50,13 @@ export const stage = (i: Item, s?: Session, pr?: PrHealth): Stage => {
   if (i.issue.stateType === "started" || s) return "progress";
   return "todo";
 };
+
+// Review mode: other people's PRs (backend reviews.rs)
+export type Bucket = "needsReview" | "draft" | "ciFailing" | "changesRequested" | "approved";
+export type ReviewAuthor = { kind: "linear"; id: string; name: string; avatarUrl: string | null } | { kind: "unlinked"; login: string };
+export type ReviewPr = {
+  key: string; sessionId: string; owner: string; repo: string; number: number; base: string; body: string; branch: string;
+  authorLogin: string; author: ReviewAuthor; requested: boolean; issue: { identifier: string; url: string } | null; bucket: Bucket; health: PrHealth;
+};
+export type ReviewFilters = { authors: string[]; statuses: Bucket[] };
+export const BUCKET_LABEL: Record<Bucket, string> = { needsReview: "Needs review", draft: "Draft", ciFailing: "CI failing", changesRequested: "Changes requested", approved: "Approved" };

@@ -186,9 +186,9 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .topbar-right { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
 .topbar-right input { width: 180px; }
 .repo-pick { position: relative; }
-.repo-pick .popover { position: absolute; right: 0; top: calc(100% + 4px); z-index: 10; min-width: 180px; max-height: 320px; overflow: auto; display: flex; flex-direction: column; padding: 4px; background: var(--raised); border: 1px solid var(--line-hi); border-radius: 7px; }
-.repo-pick .popover button { background: none; border: 0; cursor: pointer; text-align: left; padding: 6px 8px; border-radius: 5px; font-size: 12px; color: var(--text-2); }
-.repo-pick .popover button:hover, .repo-pick .popover button.on { background: var(--hover); color: var(--text); }
+.popover { position: absolute; right: 0; top: calc(100% + 4px); z-index: 10; min-width: 180px; max-height: 320px; overflow: auto; display: flex; flex-direction: column; padding: 4px; background: var(--raised); border: 1px solid var(--line-hi); border-radius: 7px; }
+.popover button { background: none; border: 0; cursor: pointer; text-align: left; padding: 6px 8px; border-radius: 5px; font-size: 12px; color: var(--text-2); }
+.popover button:hover, .popover button.on { background: var(--hover); color: var(--text); }
 /* Orca-style tab strip */
 .tabbar { display: flex; align-items: stretch; height: 34px; padding: 0 8px; background: var(--surface); border-bottom: 1px solid var(--line); overflow-x: auto; }
 .tabbar .tab { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; font-size: 12px; color: var(--muted); background: none; border: 0; border-right: 1px solid var(--line); border-top: 2px solid transparent; cursor: pointer; white-space: nowrap; }
@@ -204,3 +204,22 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .pane > .banner { margin: 8px 16px 0; }
 .pane > .question { margin-top: 10px; }
 .pane > .term { margin-top: 10px; }
+
+/* reviews list: Linear-style filter bar */
+.rail .btn.icon { position: relative; }
+.rail .badge { position: absolute; top: 2px; right: -2px; min-width: 15px; line-height: 14px; text-align: center; font-weight: 600; }
+.filter-bar { display: flex; align-items: center; gap: 6px; padding: 4px 12px 6px; }
+.filter-bar .btn { height: 24px; padding: 0 8px; font-size: 11px; }
+.filter-bar .anchor { position: relative; }
+.filter-bar .popover { left: 0; right: auto; min-width: 200px; }
+.filter-bar .clear { margin-left: auto; font-size: 11px; color: var(--dim); }
+.filter-bar .popover button { display: flex; align-items: center; gap: 8px; }
+.popover .check { width: 10px; flex: none; color: var(--brand); font-size: 11px; }
+.popover .empty { padding: 6px 8px; font-size: 12px; }
+.filter-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 6px; }
+.filter-chips .chip { max-width: 100%; overflow: hidden; color: var(--text-2); }
+.filter-chips .chip button { margin-right: -4px; padding: 0 2px; background: none; border: 0; color: var(--dim); cursor: pointer; }
+.filter-chips .chip button:hover { color: var(--text); }
+.avatar { width: 16px; height: 16px; flex: none; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; object-fit: cover; font-size: 9px; font-weight: 600; color: var(--text); background: var(--line-hi); }
+.avatar.unlinked { background: none; border: 1px dashed var(--dim); color: var(--dim); }
+.dot-req { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }

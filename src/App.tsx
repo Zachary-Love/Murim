@@ -4,13 +4,15 @@ import { listen } from "@tauri-apps/api/event";
 import Settings from "./Settings";
 import Caffeine from "./Caffeine";
 import Updater from "./Updater";
-import { Item, Repo, Session, Mode, AgentKind, LogEntry, PrMap, SEV, OVERALL, sortItems, stage } from "./types";
+import { Item, Repo, Session, Mode, AgentKind, LogEntry, PrMap, SEV, OVERALL, ReviewPr, sortItems, stage } from "./types";
 import { StateIcon, AgentIcon, PrIcon, GearIcon, FlameIcon, TasksIcon, ReviewsIcon } from "./Icons";
 import TaskPane from "./TaskPane";
+import ReviewList from "./ReviewList";
 import logo from "./assets/logo-mark.svg";
 
 type Payload = { items: Item[]; error: string | null };
 type PrPayload = { prs: PrMap; error?: string | null };
+type RvPayload = { prs: ReviewPr[]; error: string | null };
 type View = "tasks" | "reviews";
 const savedView = (): View => { try { return localStorage.getItem("murim.view") === "reviews" ? "reviews" : "tasks"; } catch { return "tasks"; } };
 
@@ -26,7 +28,8 @@ export default function App() {
   const [logs, setLogs] = useState<Record<string, LogEntry[]>>({});
   const [open, setOpen] = useState<string | null>(null);
   const [view, setView] = useState<View>(savedView);
-  const [openReview, setOpenReview] = useState<string | null>(null); // a ReviewPr.key; set by the review list (Task 6)
+  const [openReview, setOpenReview] = useState<string | null>(null); // a ReviewPr.key; kept apart from `open` so each mode keeps its selection
+  const [rv, setRv] = useState<RvPayload>({ prs: [], error: null });
   const switchView = (v: View) => { setView(v); setShowSettings(false); try { localStorage.setItem("murim.view", v); } catch {} };
   useEffect(() => {
     invoke<Record<string, Session>>("get_sessions").then(setSessions).catch(() => {});
@@ -37,9 +40,11 @@ export default function App() {
     const setPp = (v: PrPayload) => { setPrs(v.prs ?? {}); setPrErr(v.error ?? null); };
     invoke<PrPayload>("get_prs").then(setPp).catch(() => {}); // ponytail: tolerate backend without get_prs
     const up = listen<PrPayload>("prs-updated", (e) => setPp(e.payload));
+    invoke<RvPayload>("get_reviews").then(setRv).catch(() => {});
+    const ur = listen<RvPayload>("reviews-updated", (e) => setRv(e.payload));
     const ul = listen<LogEntry>("tempering-log", (e) =>
       setLogs((l) => ({ ...l, [e.payload.issueId]: [e.payload, ...(l[e.payload.issueId] ?? [])].slice(0, 20) })));
-    return () => { ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); };
+    return () => { ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); ur.then((f) => f()); };
   }, []);
 
   // re-read when Settings closes so a new default mode / agent applies without a restart
@@ -48,12 +53,13 @@ export default function App() {
     invoke<{ default_permission_mode: Mode; agent: AgentKind }>("get_settings").then((s) => { setMode(s.default_permission_mode); setAgent(s.agent); }).catch(() => {});
   }, [showSettings]);
   const openItem = p.items.find((i) => i.issue.id === open);
+  const requested = rv.prs.filter((r) => r.requested).length;
 
   return (
     <div className="app">
       <nav className="rail" data-tauri-drag-region>
         <button className={`btn icon ${view === "tasks" ? "on" : ""}`} title="Tasks" onClick={() => switchView("tasks")}><TasksIcon /></button>
-        <button className={`btn icon ${view === "reviews" ? "on" : ""}`} title="Reviews" onClick={() => switchView("reviews")}><ReviewsIcon /></button>
+        <button className={`btn icon ${view === "reviews" ? "on" : ""}`} title="Reviews" onClick={() => switchView("reviews")}><ReviewsIcon />{requested > 0 && <span className="count attn badge">{requested}</span>}</button>
         <div className="rail-bottom">
           <Updater />
           <Caffeine />
@@ -65,7 +71,10 @@ export default function App() {
           <h1 data-tauri-drag-region><img className="logo" src={logo} alt="" />Murim</h1>
           <button className="btn icon" title={`Refresh ${view}`} onClick={() => invoke(view === "tasks" ? "refresh_inbox" : "refresh_reviews").catch(() => {})}>↻</button>
         </header>
-        {view === "reviews" ? <div className="section-label">Reviews</div> : <>
+        {view === "reviews" ? <>
+        <div className="section-label">Reviews <span className="count">{rv.prs.length}</span></div>
+        <ReviewList prs={rv.prs} error={rv.error} open={showSettings ? null : openReview} onOpen={(k) => { setOpenReview(k); setShowSettings(false); }} />
+        </> : <>
         <div className="section-label">My tasks <span className="count">{p.items.length}</span></div>
         {p.error && <div className="banner">{p.error}</div>}
         {prErr && <div className="banner">{prErr}</div>}
