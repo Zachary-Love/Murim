@@ -93,7 +93,15 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
       {tab === "claude" && (
         <>
           {qs.map((q, n) => <div key={n} className="question">{q}</div>)}
-          <Terminal issueId={id} />
+          {alive ? <Terminal issueId={id} /> : (
+            // ponytail: no PTY means nothing to type into; show how to launch instead of a dead xterm.
+            <div className="empty">
+              <p>{session ? "Claude isn't running for this task." : "Claude hasn't been started for this task."}</p>
+              {!item.repo ? <p>Pick a repo first.</p> : session
+                ? <button onClick={() => run("resume_task", { prompt: prompt || null })}>Resume Claude</button>
+                : <button onClick={start}>Start Claude ({mode})</button>}
+            </div>
+          )}
         </>
       )}
       {tab === "pr" && (
