@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import Settings from "./Settings";
 import Caffeine from "./Caffeine";
 import { Item, Repo, Session, Mode, LogEntry, PrMap, SEV, OVERALL, sortItems } from "./types";
-import { StateIcon, ClaudeIcon, PrIcon } from "./Icons";
+import { StateIcon, ClaudeIcon, PrIcon, ClaudeMark } from "./Icons";
 import TaskPane from "./TaskPane";
 
 type Payload = { items: Item[]; error: string | null };
@@ -40,15 +40,20 @@ export default function App() {
   return (
     <div className="app">
       <aside className="sidebar">
-        <h1>Murim <button className="refresh" title="Refresh" onClick={() => invoke("refresh_inbox")}>↻</button></h1>
-        <button onClick={() => setShowSettings(!showSettings)}>Settings</button>
+        <header className="brand">
+          <h1>Murim</h1>
+          <button className="btn icon" title="Refresh tasks" onClick={() => invoke("refresh_inbox")}>↻</button>
+          <button className={`btn icon ${showSettings ? "on" : ""}`} title="Settings" onClick={() => setShowSettings(!showSettings)}>⚙</button>
+        </header>
+        <div className="section-label">My tasks <span className="count">{p.items.length}</span></div>
         {p.error && <div className="banner">{p.error}</div>}
         {prErr && <div className="banner">{prErr}</div>}
         <ul className="tasks">
           {sortItems(p.items, sessions, prs).map((i) => {
             const id = i.issue.id, se = sessions[id], pr = prs[id];
             return (
-              <li key={id} className={open === id && !showSettings ? "on" : ""} title={i.issue.title}
+              <li key={id}>
+                <button className={`row ${open === id && !showSettings ? "on" : ""} ${se?.status === "needsInput" ? "attn" : ""}`} title={i.issue.title}
                 onClick={() => { setOpen(id); setShowSettings(false); }}>
                 <StateIcon type={i.issue.stateType} />
                 <span className="ident">{i.issue.identifier}</span>
@@ -56,17 +61,18 @@ export default function App() {
                 <ClaudeIcon status={se?.status} />
                 {se?.tempering && <span title="Tempering">🔥</span>}
                 {pr && <PrIcon color={SEV[pr.overall] ?? "grey"} n={se?.escalations?.length} title={`${OVERALL[pr.overall] ?? pr.overall} #${pr.number}`} />}
+                </button>
               </li>
             );
           })}
-          {!p.items.length && <li className="empty">No tasks</li>}
+          {!p.items.length && <li className="empty">No tasks in your active cycle</li>}
         </ul>
         <footer className="sidebar-footer"><Caffeine /></footer>
       </aside>
       <main className="main">
         {showSettings ? <Settings /> : openItem ? (
           <TaskPane key={openItem.issue.id} item={openItem} session={sessions[openItem.issue.id]} pr={prs[openItem.issue.id]} log={logs[openItem.issue.id] ?? []} repos={repos} defaultMode={mode} />
-        ) : <p className="empty">Select a task</p>}
+        ) : <div className="empty-state"><ClaudeMark size={28} /><p>Select a task to see the issue and start Claude on it.</p></div>}
       </main>
     </div>
   );

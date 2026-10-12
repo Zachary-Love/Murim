@@ -10,7 +10,7 @@ const bytes = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)
 export default function Terminal({ issueId }: { issueId: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const term = new XTerm({ fontSize: 13, cursorBlink: true, theme: { background: "#0e0f11", foreground: "#d4d6da" } });
+    const term = new XTerm({ fontSize: 12.5, fontFamily: '"SF Mono", Menlo, monospace', cursorBlink: true, theme: { background: "#0a0a0a", foreground: "#e5e5e5", cursor: "#d97757", selectionBackground: "#d9775744" } });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(ref.current!);

@@ -4,6 +4,8 @@ export type Item = {
   resolving: boolean;
 };
 export type Mode = "normal" | "allowlist" | "skip";
+// Claude Code's own names for what each mode passes to `claude`.
+export const MODE_LABEL: Record<Mode, string> = { normal: "Ask permissions", allowlist: "Accept edits + dev tools", skip: "Bypass permissions" };
 export type Status = "starting" | "working" | "needsInput" | "idle" | "ended";
 export type Session = { issueId: string; worktree: string; sessionId: string | null; status: Status; questions: unknown; ptyAlive: boolean; permissionMode: Mode; tempering?: boolean; replyMode?: ReplyMode; escalations?: Escalation[]; prFlow?: string };
 export type ReplyMode = "off" | "terse" | "full";

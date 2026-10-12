@@ -12,9 +12,11 @@ export default function Caffeine() {
       .then(() => { setOn(enabled); setErr(""); })
       .catch((e) => setErr(String(e)));
   return (
-    <label>
-      <input type="checkbox" checked={on} onChange={(e) => toggle(e.target.checked)} /> ☕ Caffeine
-      {err && <div className="error">{err}</div>}
-    </label>
+    <>
+      <button className={`btn toggle ${on ? "on" : ""}`} aria-pressed={on} title="Keep this Mac awake so Claude keeps running" onClick={() => toggle(!on)}>
+        ☕ Caffeine {on ? "on" : "off"}
+      </button>
+      {err && <div className="err">{err}</div>}
+    </>
   );
 }

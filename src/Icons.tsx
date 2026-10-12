@@ -14,10 +14,17 @@ export const StateIcon = ({ type }: { type: string }) => {
   );
 };
 
+// Claude's starburst mark, in the Claude accent.
+export const ClaudeMark = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 14 14" className="ico claude-mark" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+    {[0, 45, 90, 135].map((a) => <line key={a} x1="7" y1="1.5" x2="7" y2="12.5" transform={`rotate(${a} 7 7)`} />)}
+  </svg>
+);
+
 export const ClaudeIcon = ({ status }: { status?: Status }) => {
-  if (status === "starting" || status === "working") return <i className="ico spin" title="Working" />;
-  if (status === "needsInput") return <i className="ico dot-input" title="Needs input" />;
-  if (status === "idle") return <i className="ico dot-idle" title="Idle" />;
+  if (status === "starting" || status === "working") return <i className="ico spin" title="Claude working" />;
+  if (status === "needsInput") return <i className="ico dot-input" title="Claude needs input" />;
+  if (status === "idle") return <i className="ico dot-idle" title="Claude idle" />;
   return null;
 };
 

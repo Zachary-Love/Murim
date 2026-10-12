@@ -3,10 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import Terminal from "./Terminal";
 import IssueView from "./IssueView";
-import { Item, Session, PrHealth, Repo, Mode, LABEL, OVERALL, SEV, STEP, LogEntry } from "./types";
+import { Item, Session, PrHealth, Repo, Mode, LABEL, OVERALL, SEV, STEP, LogEntry, MODE_LABEL } from "./types";
+import { ClaudeMark, ClaudeIcon, PrIcon } from "./Icons";
 
 const prBadge = (p: PrHealth) => (
-  <a className={`badge pr ${SEV[p.overall] ?? "grey"}`} title={p.title} onClick={() => openUrl(p.url)}>#{p.number} {OVERALL[p.overall] ?? p.overall}</a>
+  <button className={`chip ${SEV[p.overall] ?? "grey"}`} title={`Open PR: ${p.title}`} onClick={() => openUrl(p.url)}><PrIcon color="" title="" />#{p.number} {OVERALL[p.overall] ?? p.overall} ↗</button>
 );
 type Tab = "issue" | "claude" | "pr";
 
@@ -38,108 +39,128 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode }:
   const qs = session?.status === "needsInput" ? texts(session.questions) : [];
   const alive = !!session?.ptyAlive;
   const start = () => run("start_task", { permissionMode: mode }).then(() => setTab("claude"));
+  const resume = () => run("resume_task", { prompt: prompt || null }).then(() => setTab("claude"));
   const pickRepo = !item.repo || item.repo.source === "semantic" || item.repo.source === "claude";
-  const T = ({ id, children }: { id: Tab; children: ReactNode }) => <button className={`tab ${tab === id ? "on" : ""}`} onClick={() => setTab(id)}>{children}</button>;
+  const T = ({ id, children }: { id: Tab; children: ReactNode }) => <button className={tab === id ? "on" : ""} onClick={() => setTab(id)}>{children}</button>;
   return (
     <div className="pane">
-      <div className="pane-head">
-        <a className="ident" onClick={() => openUrl(item.issue.url)}>{item.issue.identifier}</a>
-        <span className="pane-title" title={item.issue.title}>{item.issue.title}</span>
-        {session && <span className={`badge ${session.status}`}>{LABEL[session.status]}</span>}
-        {session && <span className="step">{STEP[session.prFlow ?? "none"] ?? "Implementing"}</span>}
+      <header className="pane-head">
+        <button className="chip mono" title="Open in Linear" onClick={() => openUrl(item.issue.url)}>{item.issue.identifier} ↗</button>
+        <h2 className="pane-title" title={item.issue.title}>{item.issue.title}</h2>
+        {session && <span className={`chip status ${session.status}`}><ClaudeIcon status={session.status} />{LABEL[session.status]}</span>}
+        {session && <span className="chip step">{STEP[session.prFlow ?? "none"] ?? "Implementing"}</span>}
         {pr && prBadge(pr)}
-      </div>
-      <div className="pane-head actions">
-        {item.resolving && <span className="badge">matching…</span>}
+      </header>
+      <div className="toolbar">
+        {item.resolving && <span className="chip">Matching repo…</span>}
         {pickRepo && (
-          <select value={item.repo?.path ?? ""} onChange={(e) => invoke("set_issue_repo", { issueId: id, path: e.target.value }).catch((x) => setErr(String(x)))}>
-            {!item.repo && <option value="" disabled>Pick repo…</option>}
-            {repos.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
-          </select>
-        )}
-        {!alive && (
-          <>
-            <select value={mode} title="Permission mode" onChange={(e) => setMode(e.target.value as Mode)}>
-              <option value="normal">normal</option>
-              <option value="allowlist">allowlist</option>
-              <option value="skip">skip</option>
+          <label className="field">Repo
+            <select value={item.repo?.path ?? ""} onChange={(e) => invoke("set_issue_repo", { issueId: id, path: e.target.value }).catch((x) => setErr(String(x)))}>
+              {!item.repo && <option value="" disabled>Pick repo…</option>}
+              {repos.map((r) => <option key={r.path} value={r.path}>{r.name}</option>)}
             </select>
-            {mode === "skip" && <span title="Skips all permission prompts">⚠</span>}
-            <button disabled={!item.repo} onClick={start}>Start</button>
-          </>
+          </label>
         )}
+        <div className="group claude">
+          {alive ? (
+            <button className="btn danger" onClick={() => run("stop_task")}>■ Stop Claude</button>
+          ) : (
+            <>
+              <select value={mode} title="Claude Code permission mode" className={mode === "skip" ? "warn" : ""} onChange={(e) => setMode(e.target.value as Mode)}>
+                {(Object.keys(MODE_LABEL) as Mode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
+              </select>
+              <button className={`btn ${session ? "" : "primary"}`} disabled={!item.repo} title={item.repo ? (session ? "Start a fresh Claude conversation in this worktree" : "") : "Pick a repo first"} onClick={start}><ClaudeMark />{session ? "New session" : "Start Claude"}</button>
+            </>
+          )}
+        </div>
         {session && !alive && (
-          <>
-            <input placeholder="Prompt (optional)" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
-            <button onClick={() => run("resume_task", { prompt: prompt || null }).then(() => setTab("claude"))}>Resume</button>
-          </>
+          <div className="group">
+            <input placeholder="Follow-up prompt (optional)" value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+            <button className="btn primary" onClick={resume}>↻ Resume Claude</button>
+          </div>
         )}
-        {alive && <button onClick={() => run("stop_task")}>Stop</button>}
         {pr && session && (
-          <>
-            <button className={session.tempering ? "on" : ""} onClick={() => run("set_tempering", { on: !session.tempering })}>🔥 Temper</button>
-            <select value={session.replyMode ?? "terse"} title="Reply mode" onChange={(e) => run("set_reply_mode", { mode: e.target.value })}>
+          <div className="group">
+            <button className={`btn toggle ${session.tempering ? "on" : ""}`} title="Babysit the PR: rerun CI, fix failures, answer reviews" onClick={() => run("set_tempering", { on: !session.tempering })}>🔥 Tempering {session.tempering ? "on" : "off"}</button>
+            <select value={session.replyMode ?? "terse"} title="How Claude replies to review comments" onChange={(e) => run("set_reply_mode", { mode: e.target.value })}>
               <option value="off">Replies: off</option>
               <option value="terse">Replies: terse</option>
               <option value="full">Replies: full</option>
             </select>
-          </>
+          </div>
         )}
-        <button onClick={() => openUrl(item.issue.url)}>Open in Linear</button>
       </div>
       {err && <div className="banner">{err}</div>}
-      <div className="tabs"><T id="issue">Issue</T><T id="claude">Claude</T><T id="pr">PR{!!session?.escalations?.length && ` (${session.escalations.length})`}</T></div>
+      <nav className="seg">
+        <T id="issue">Issue</T>
+        <T id="claude"><ClaudeMark size={12} />Claude<ClaudeIcon status={session?.status} /></T>
+        <T id="pr">PR{pr && ` #${pr.number}`}{!!session?.escalations?.length && <span className="count">{session.escalations.length}</span>}</T>
+      </nav>
       {tab === "issue" && <IssueView issueId={id} />}
       {tab === "claude" && (
         <>
-          {qs.map((q, n) => <div key={n} className="question">{q}</div>)}
+          {qs.length > 0 && (
+            <div className="question">
+              <div className="q-head"><ClaudeMark />Claude is asking — answer in the terminal below</div>
+              {qs.map((q, n) => <div key={n}>{q}</div>)}
+            </div>
+          )}
           {alive ? <Terminal issueId={id} /> : (
             // ponytail: no PTY means nothing to type into; show how to launch instead of a dead xterm.
-            <div className="empty">
+            <div className="empty-state">
+              <ClaudeMark size={28} />
               <p>{session ? "Claude isn't running for this task." : "Claude hasn't been started for this task."}</p>
-              {!item.repo ? <p>Pick a repo first.</p> : session
-                ? <button onClick={() => run("resume_task", { prompt: prompt || null })}>Resume Claude</button>
-                : <button onClick={start}>Start Claude ({mode})</button>}
+              {!item.repo ? <p className="muted">Pick a repo first.</p> : session
+                ? <button className="btn primary" onClick={resume}>↻ Resume Claude</button>
+                : <button className="btn primary" onClick={start}><ClaudeMark />Start Claude · {MODE_LABEL[mode]}</button>}
             </div>
           )}
         </>
       )}
       {tab === "pr" && (
         <div className="prtab">
-          {!pr && <p className="empty">No pull request</p>}
-      {pr && (
-        <div className={`prbox ${SEV[pr.overall] ?? "grey"}`}>
-          <div>{prBadge(pr)} <a onClick={() => openUrl(pr.url)}>{pr.title}</a> <button onClick={() => invoke("refresh_prs").catch((e) => setErr(String(e)))}>↻ PR</button></div>
-          <div className="meta">
-            CI: {pr.ci}{pr.failingChecks.length > 0 && ` (${pr.failingChecks.join(", ")})`}
-            {" · "}{pr.unresolvedThreads} unresolved thread{pr.unresolvedThreads === 1 ? "" : "s"}
-            {" · "}review: {pr.reviewDecision ?? (pr.changesRequested ? "CHANGES_REQUESTED" : "none")}
-            {pr.conflict && <b className="conflict"> · merge conflict</b>}
-          </div>
-        </div>
-      )}
-      {pr && session && (
-        <div className="prbox temper">
-          {(session.escalations ?? []).map((x) => (
-            <div key={x.id} className="esc">
-              <div className="meta">{x.path}</div>
+          {!pr && <p className="empty-state">No pull request yet. Claude opens a draft PR when it finishes.</p>}
+          {pr && (
+            <section className={`card ${SEV[pr.overall] ?? "grey"}`}>
+              <div className="card-head">
+                {prBadge(pr)}
+                <button className="link-btn" onClick={() => openUrl(pr.url)}>{pr.title}</button>
+                <button className="btn icon" title="Refresh PR status" onClick={() => invoke("refresh_prs").catch((e) => setErr(String(e)))}>↻</button>
+              </div>
+              <div className="facts">
+                <span className="chip">CI: {pr.ci}{pr.failingChecks.length > 0 && ` (${pr.failingChecks.join(", ")})`}</span>
+                <span className="chip">{pr.unresolvedThreads} unresolved thread{pr.unresolvedThreads === 1 ? "" : "s"}</span>
+                <span className="chip">Review: {pr.reviewDecision ?? (pr.changesRequested ? "CHANGES_REQUESTED" : "none")}</span>
+                {pr.conflict && <span className="chip red">Merge conflict</span>}
+              </div>
+            </section>
+          )}
+          {pr && session && (session.escalations ?? []).map((x) => (
+            <section key={x.id} className="card amber">
+              <div className="q-head"><ClaudeMark />Claude disagrees with a review comment</div>
+              <div className="meta mono">{x.path}</div>
               <blockquote>{x.comment}</blockquote>
-              <div>Claude: {x.reason}</div>
-              <button disabled={busy} onClick={() => resolve(x.id, "doIt")}>Do it anyway</button>
-              <button disabled={busy} onClick={() => resolve(x.id, "postPushback")}>Post Claude's pushback</button>
-              <button disabled={busy} onClick={() => setOwn(own === x.id ? null : x.id)}>Write my own reply</button>
-              <button disabled={busy} onClick={() => resolve(x.id, "ignore")}>Ignore</button>
+              <p>{x.reason}</p>
+              <div className="group">
+                <button className="btn primary" disabled={busy} onClick={() => resolve(x.id, "doIt")}>Do it anyway</button>
+                <button className="btn" disabled={busy} onClick={() => resolve(x.id, "postPushback")}>Post Claude's pushback</button>
+                <button className={`btn ${own === x.id ? "on" : ""}`} disabled={busy} onClick={() => setOwn(own === x.id ? null : x.id)}>Write my own reply</button>
+                <button className="btn ghost" disabled={busy} onClick={() => resolve(x.id, "ignore")}>Ignore</button>
+              </div>
               {own === x.id && (
-                <div>
-                  <textarea value={text} onChange={(e) => setText(e.target.value)} />
-                  <button disabled={busy || !text.trim()} onClick={() => resolve(x.id, "ownReply", text)}>Send</button>
+                <div className="reply">
+                  <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Your reply…" />
+                  <button className="btn primary" disabled={busy || !text.trim()} onClick={() => resolve(x.id, "ownReply", text)}>Send reply</button>
                 </div>
               )}
-            </div>
+            </section>
           ))}
-          {log.length > 0 && <ul className="tlog">{log.map((l, n) => <li key={n}><span className="meta">{ago(l.at)}</span> {l.message}</li>)}</ul>}
-        </div>
-      )}
+          {pr && session && log.length > 0 && (
+            <section className="card">
+              <div className="q-head">🔥 Tempering activity</div>
+              <ul className="tlog">{log.map((l, n) => <li key={n}><span className="meta">{ago(l.at)}</span> {l.message}</li>)}</ul>
+            </section>
+          )}
         </div>
       )}
     </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { MODE_LABEL } from "./types";
 
 type S = { repos_root: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean };
 
@@ -32,25 +33,23 @@ export default function Settings() {
   return (
     <form className="settings" onSubmit={(e) => { e.preventDefault(); save(); }}>
       <h2>Settings</h2>
-      <label>Repos root
+      <label>Repos folder
         <input value={s.repos_root} onChange={(e) => setS({ ...s, repos_root: e.target.value })} />
       </label>
-      <label>Default permission mode
+      <label>Default Claude permission mode
         <select value={s.default_permission_mode}
           onChange={(e) => setS({ ...s, default_permission_mode: e.target.value as S["default_permission_mode"] })}>
-          <option value="normal">normal</option>
-          <option value="allowlist">allowlist</option>
-          <option value="skip">skip</option>
+          {(Object.keys(MODE_LABEL) as S["default_permission_mode"][]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
         </select>
       </label>
       {s.default_permission_mode === "skip" && (
-        <p className="warn">Warning: skip runs agents without any permission prompts.</p>
+        <p className="warn">Bypass permissions runs Claude with --dangerously-skip-permissions: no prompts for any tool.</p>
       )}
-      <label>Linear API key {hasKey && <span>saved ✓</span>}
+      <label>Linear API key {hasKey && <span className="chip green">saved</span>}
         <input type="password" value={key} placeholder={hasKey ? "enter to replace" : ""}
           onChange={(e) => setKey(e.target.value)} />
       </label>
-      <button type="submit">Save</button> {msg}
+      <div className="group"><button className="btn primary" type="submit">Save</button> <span className="muted">{msg}</span></div>
     </form>
   );
 }
