@@ -184,3 +184,4 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .review > * { flex-shrink: 0; }
 .md h1, .md h2, .md h3 { font-size: 14px; margin: 10px 0 4px; color: var(--text); }
 .brand .logo { width: 18px; height: 22px; }
+.logo-lg { width: 40px; height: 48px; }

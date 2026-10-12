@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import Settings from "./Settings";
 import Caffeine from "./Caffeine";
 import { Item, Repo, Session, Mode, LogEntry, PrMap, SEV, OVERALL, sortItems, stage } from "./types";
-import { StateIcon, ClaudeIcon, PrIcon, ClaudeMark, GearIcon } from "./Icons";
+import { StateIcon, ClaudeIcon, PrIcon, GearIcon } from "./Icons";
 import TaskPane from "./TaskPane";
 import logo from "./assets/logo-mark.svg";
 
@@ -75,7 +75,7 @@ export default function App() {
       <main className="main">
         {showSettings ? <Settings /> : openItem ? (
           <TaskPane key={openItem.issue.id} item={openItem} session={sessions[openItem.issue.id]} pr={prs[openItem.issue.id]} log={logs[openItem.issue.id] ?? []} repos={repos} defaultMode={mode} />
-        ) : <div className="empty-state"><ClaudeMark size={28} /><p>Select a task to see the issue and start Claude on it.</p></div>}
+        ) : <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Select a task to start working on it.</p></div>}
       </main>
     </div>
   );
