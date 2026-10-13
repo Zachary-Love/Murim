@@ -79,3 +79,7 @@ export const DownloadIcon = () => (
 export const ClockIcon = () => (
   <svg {...L}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
 );
+
+export const PlusIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="M6 1.5v9M1.5 6h9" /></svg>
+);

@@ -250,7 +250,7 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .draft-comment .x:hover { color: var(--red); }
 
 /* meditations */
-.section-label .new { margin-left: auto; width: 22px; height: 22px; padding: 0; font-size: 15px; line-height: 1; }
+.section-label .new { margin-left: auto; width: 22px; height: 22px; padding: 0; justify-content: center; }
 .section-label .new:hover { color: var(--text); background: var(--hover); }
 .med-sec { flex: none; display: flex; flex-direction: column; min-height: 0; }
 .med-sec.half { flex: 0 1 auto; max-height: 40%; } /* both open: sessions capped, artifacts take the rest */
@@ -260,8 +260,8 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .sec-toggle:hover { color: var(--text); }
 .sec-toggle .chev { width: 14px; font-size: 13px; }
 .meds li { position: relative; }
-.meds li:hover .row { padding-right: 28px; }
-.meds .x { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; padding: 0; display: none; background: none; border: 0; border-radius: 4px; color: var(--dim); cursor: pointer; font-size: 14px; line-height: 1; }
+.meds li:hover .row { padding-right: 32px; }
+.meds .x { position: absolute; top: 4px; right: 5px; width: 22px; height: 22px; padding: 0; display: none; background: none; border: 0; border-radius: 4px; color: var(--dim); cursor: pointer; font-size: 18px; line-height: 1; }
 .meds li:hover .x { display: block; }
 .meds .x:hover { background: var(--line-hi); color: var(--red); }
 .meds .rename { width: 100%; height: 30px; }

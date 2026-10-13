@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Artifact, MedSel, Session, isMed } from "./types";
-import { AgentIcon } from "./Icons";
+import { AgentIcon, PlusIcon } from "./Icons";
 
 // Artifact list + search. Reloads (debounced) on view open, query change, reload(), and when a meditation's turn ends.
 export function useArtifacts(active: boolean, sessions: Record<string, Session>) {
@@ -54,7 +54,7 @@ export default function MeditationList({ sessions, sel, onOpen, noRepos, arts, q
       <div className={`med-sec ${sOpen ? (aOpen ? "half" : "grow") : ""}`}>
       <div className="section-label">
         <button className="sec-toggle" aria-expanded={sOpen} onClick={() => setSOpen(!sOpen)}><span className="chev">{sOpen ? "▾" : "▸"}</span>Sessions</button>
-        <button className="btn ghost new" title="Start a new session in your repos folder" onClick={add}>+</button>
+        <button className="btn ghost new" title="Start a new session in your repos folder" onClick={add}><PlusIcon /></button>
       </div>
       {(err || noRepos) && <div className="banner">{err || "Set your repos folder in Settings"}</div>}
       {sOpen && <ul className="tasks meds">
@@ -69,7 +69,7 @@ export default function MeditationList({ sessions, sel, onOpen, noRepos, arts, q
                 <button className={`row ${on ? "on" : ""} ${s.status === "needsInput" ? "attn" : ""}`} title="Double-click to rename"
                   onClick={() => onOpen({ kind: "session", id })} onDoubleClick={() => { setEditing(id); setName(s.name ?? ""); }}>
                   <span className="t">{s.name || id}</span>
-                  <AgentIcon status={s.status} />
+                  {s.status === "needsInput" && <AgentIcon status={s.status} />}
                 </button>
               )}
               {editing !== id && <button className="x" title="Stop and remove this session (artifacts are kept)" onClick={() => del(id)}>×</button>}

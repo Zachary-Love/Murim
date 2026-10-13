@@ -1,3 +1,4 @@
+import { PlusIcon } from "./Icons";
 import { Automation, AutoSel, Session, scheduleText, until, runStatus } from "./types";
 
 type Props = { autos: Automation[]; sessions: Record<string, Session>; selAuto: string | null; onOpen: (s: AutoSel) => void };
@@ -6,7 +7,7 @@ export default function AutomationList({ autos, sessions, selAuto, onOpen }: Pro
   return (
     <>
       <div className="section-label">Automations
-        <button className="btn ghost new" title="New automation" onClick={() => onOpen({ kind: "automation", id: "" })}>+</button>
+        <button className="btn ghost new" title="New automation" onClick={() => onOpen({ kind: "automation", id: "" })}><PlusIcon /></button>
       </div>
       <ul className="tasks autos">
         {autos.map((a) => {
