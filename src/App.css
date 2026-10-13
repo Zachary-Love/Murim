@@ -211,6 +211,7 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .pane > .banner { margin: 8px 16px 0; }
 .pane > .question { margin-top: 10px; }
 .pane > .term { margin-top: 10px; }
+.pane > .term:first-child { margin-top: 16px; } /* no top bar (meditations): even gutter */
 
 /* reviews list: Linear-style filter bar */
 .rail .btn.icon { position: relative; }

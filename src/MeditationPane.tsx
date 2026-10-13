@@ -14,14 +14,15 @@ export function SessionPane({ id, session, title, noun = "meditation" }: { id: s
   const resume = () => run("resume_task", { prompt: null });
   return (
     <div className="pane">
-      <header className="topbar" data-tauri-drag-region>
-        <span className="pane-title" data-tauri-drag-region>{title ?? (session.name || id)}<AgentIcon status={session.status} /></span>
+      {/* meditations have no bar (just the terminal); automation runs keep theirs for the run title */}
+      {title !== undefined && <header className="topbar" data-tauri-drag-region>
+        <span className="pane-title" data-tauri-drag-region>{title}<AgentIcon status={session.status} /></span>
         <div className="topbar-right" data-tauri-drag-region>
           {session.ptyAlive
             ? <button className="btn danger" onClick={() => run("stop_task")}>■ Stop agent</button>
             : <button className="btn primary" onClick={resume}>↻ Resume agent</button>}
         </div>
-      </header>
+      </header>}
       {err && <div className="banner">{err}</div>}
       {session.ptyAlive ? <Terminal key={id} issueId={id} /> : (
         <div className="empty-state">
