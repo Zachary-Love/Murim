@@ -39,6 +39,9 @@ export default function MeditationList({ sessions, sel, onOpen, noRepos, arts, q
   const [err, setErr] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [sOpen, setSOpen] = useState(true);
+  const [aPick, setAPick] = useState<boolean | null>(null); // null: open only when there are artifacts (or a search)
+  const aOpen = aPick ?? (arts.length > 0 || query.trim() !== "");
   const meds = Object.values(sessions).filter((s) => isMed(s.issueId)).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
   const add = () => invoke<string>("start_meditation").then((id) => { setErr(""); onOpen({ kind: "session", id }); }).catch((e) => setErr(String(e)));
   const rename = (id: string) => {
@@ -48,11 +51,13 @@ export default function MeditationList({ sessions, sel, onOpen, noRepos, arts, q
   const del = (id: string) => invoke("delete_meditation", { id }).then(() => { if (sel?.id === id) onOpen(null); }).catch((e) => setErr(String(e)));
   return (
     <>
-      <div className="section-label">Meditations <span className="count">{meds.length}</span>
-        <button className="btn ghost new" title="Start a new meditation in your repos folder" onClick={add}>+ New</button>
+      <div className={`med-sec ${sOpen ? (aOpen ? "half" : "grow") : ""}`}>
+      <div className="section-label">
+        <button className="sec-toggle" aria-expanded={sOpen} onClick={() => setSOpen(!sOpen)}><span className="chev">{sOpen ? "▾" : "▸"}</span>Sessions</button>
+        <button className="btn ghost new" title="Start a new session in your repos folder" onClick={add}>+</button>
       </div>
       {(err || noRepos) && <div className="banner">{err || "Set your repos folder in Settings"}</div>}
-      <ul className="tasks meds">
+      {sOpen && <ul className="tasks meds">
         {meds.map((s) => {
           const id = s.issueId, on = sel?.kind === "session" && sel.id === id;
           return (
@@ -71,9 +76,14 @@ export default function MeditationList({ sessions, sel, onOpen, noRepos, arts, q
             </li>
           );
         })}
-        {!meds.length && <li className="empty">No sessions yet</li>}
-      </ul>
-      <div className="section-label">Artifacts <span className="count">{arts.length}</span></div>
+        {!meds.length && <li className="empty">Nothing yet.</li>}
+      </ul>}
+      </div>
+      <div className={`med-sec ${aOpen ? "grow" : "bottom"}`}>
+      <div className="section-label">
+        <button className="sec-toggle" aria-expanded={aOpen} onClick={() => setAPick(!aOpen)}><span className="chev">{aOpen ? "▾" : "▸"}</span>Artifacts</button>
+      </div>
+      {aOpen && <>
       <div className="search"><input value={query} placeholder="Search artifacts…" onChange={(e) => setQuery(e.target.value)} /></div>
       {artErr && <div className="banner">{artErr}</div>}
       <ul className="tasks">
@@ -85,8 +95,10 @@ export default function MeditationList({ sessions, sel, onOpen, noRepos, arts, q
             </button>
           </li>
         ))}
-        {!arts.length && <li className="empty">{query.trim() ? "No artifacts match" : "No artifacts yet. Ask a meditation to write one."}</li>}
+        {!arts.length && <li className="empty">{query.trim() ? "No artifacts match" : "Nothing yet."}</li>}
       </ul>
+      </>}
+      </div>
     </>
   );
 }
