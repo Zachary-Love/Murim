@@ -68,7 +68,7 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .app { display: flex; height: 100%; }
 .sidebar { width: 296px; flex: none; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--line); }
 /* no native title bar: traffic lights (x 14-66) span the 52px rail + 14px of this header, so 28px clears them; keep both bars draggable */
-.brand { display: flex; align-items: center; gap: 4px; height: 52px; padding: 0 12px 0 28px; }
+.brand { display: flex; align-items: center; gap: 4px; height: 52px; padding: 0 12px 0 28px; border-bottom: 1px solid var(--line); flex: none; }
 .brand h1 { display: flex; align-items: center; gap: 6px; flex: 1; font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: .01em; }
 .brand .btn.icon { background: none; border-color: transparent; color: var(--muted); }
 .brand .btn.icon:hover, .brand .btn.icon.on { background: var(--hover); border-color: var(--line-hi); color: var(--text); }
@@ -87,7 +87,11 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .tasks .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tasks .ident { font: 11px var(--mono); color: var(--dim); }
 /* icon rail: macOS traffic lights sit above its icons (window has no title bar) */
-.rail { width: 52px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 52px 0 10px; background: var(--surface); border-right: 1px solid var(--line); }
+.rail { width: 52px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 52px 0 10px; background: var(--surface); position: relative; }
+/* title-bar band: a horizontal line under the traffic lights (lines up with the sidebar header and main top bar); the
+   rail's vertical divider starts below it instead of running up behind the window controls */
+.rail::before { content: ""; position: absolute; left: 0; right: 0; top: 51px; border-top: 1px solid var(--line); }
+.rail::after { content: ""; position: absolute; top: 51px; bottom: 0; right: 0; border-right: 1px solid var(--line); }
 .rail .btn.icon { width: 34px; height: 34px; background: none; border-color: transparent; box-shadow: none; color: var(--dim); }
 .rail .btn.icon:hover { color: var(--text); background: var(--hover); }
 .rail .btn.icon.on { color: var(--brand); background: var(--hover); }
