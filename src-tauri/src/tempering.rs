@@ -277,8 +277,8 @@ fn post(app: &AppHandle, id: &str, thread_id: &str, body: &str, resolve: bool) -
 
 /// Read + truncate `.murim/replies.jsonl`, apply the reply mode, post; disagreements become escalations.
 pub fn consume(app: &AppHandle, id: &str) {
-    if id.starts_with("review:") {
-        return; // review agents write review.json, never replies
+    if sessions::no_pr_flow(id) {
+        return; // review agents write review.json, meditations have no PR
     }
     static LOCK: Mutex<()> = Mutex::new(());
     let _g = LOCK.lock().unwrap();

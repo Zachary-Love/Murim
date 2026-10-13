@@ -15,6 +15,10 @@ list, puts Claude Code to work on a task with one button, and babysits the PR to
   **Review with agent** checks the PR out in `~/.murim/reviews/<repo>/<n>` (the repo must be cloned under your repos
   folder) and has your agent draft a review into `.murim/review.json`. You edit the summary, verdict and line comments in
   Murim; nothing is posted to GitHub until you click Post. The checkout is removed on Dismiss or when the PR closes.
+- **Meditations** — free-form agent sessions in your repos folder for questions and plans not tied to an issue
+  ("how does X work?", "plan Y across my stack"). Sessions get a random name you can rename. The agent saves anything
+  worth keeping as markdown in the Meditations folder (Settings, default `~/.murim/meditations`); Murim lists and
+  searches those artifacts and renders them. Meditations use your Settings permission mode, on your real checkouts.
 - **Caffeine** — keeps the Mac awake while flows run.
 
 macOS only for now. Version 0.1.0 is early software.

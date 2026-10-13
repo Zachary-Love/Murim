@@ -241,3 +241,20 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .draft-comment .meta { display: flex; align-items: center; justify-content: space-between; }
 .draft-comment .x { background: none; border: 0; color: var(--dim); cursor: pointer; font-size: 14px; }
 .draft-comment .x:hover { color: var(--red); }
+
+/* meditations */
+.section-label .new { margin-left: auto; height: 22px; padding: 0 6px; font-size: 11px; text-transform: none; letter-spacing: 0; }
+.section-label .new:hover { color: var(--text); background: var(--hover); }
+.tasks.meds { flex: 0 1 auto; max-height: 40%; }
+.meds li { position: relative; }
+.meds li:hover .row { padding-right: 28px; }
+.meds .x { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; padding: 0; display: none; background: none; border: 0; border-radius: 4px; color: var(--dim); cursor: pointer; font-size: 14px; line-height: 1; }
+.meds li:hover .x { display: block; }
+.meds .x:hover { background: var(--line-hi); color: var(--red); }
+.meds .rename { width: 100%; height: 30px; }
+.search { padding: 2px 12px 6px; }
+.search input { width: 100%; }
+.pane-title { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text); overflow: hidden; white-space: nowrap; }
+.pane-title.path { display: block; font-weight: 400; font-size: 12px; color: var(--muted); text-overflow: ellipsis; }
+.pane-title.path { flex: 1; } .pane-title.path + .topbar-right { flex: none; }
+.md table { border-collapse: collapse; margin: 8px 0; } .md th, .md td { padding: 4px 10px; border: 1px solid var(--line); text-align: left; }

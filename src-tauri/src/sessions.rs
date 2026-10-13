@@ -40,6 +40,9 @@ pub struct SessionInfo {
     pub agent: AgentKind,
     #[serde(default)]
     pub agent_command: String,
+    /// meditation display name
+    #[serde(default)]
+    pub name: String,
     /// set when tempering resumes the session; cleared on the next Stop
     #[serde(skip)]
     pub tempering_turn: bool,
@@ -102,7 +105,19 @@ pub fn kill_all(app: &AppHandle) {
 
 // ---- hooks -> status ----
 
+/// Agent-only sessions (review, meditation): no PR polling, no Tempering.
+pub fn no_pr_flow(id: &str) -> bool {
+    id.starts_with("review:") || is_meditation(id)
+}
+
+pub fn is_meditation(id: &str) -> bool {
+    id.starts_with("meditation:")
+}
+
 pub fn title_of(s: &SessionInfo) -> String {
+    if is_meditation(&s.issue_id) {
+        return s.name.clone();
+    }
     if let Some(pr) = s.issue_id.strip_prefix("review:") {
         return format!("Review {pr}"); // "Review owner/repo/12"
     }
@@ -133,7 +148,8 @@ pub fn changes_prompt(feedback: &str) -> String {
 
 pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
     let stop = ev["hook_event_name"] == "Stop";
-    let has_pr = stop && crate::github::get_prs(app.state()).prs.contains_key(task);
+    let med = is_meditation(task); // status + notifications only: no repo pick, markers, PR flow or Tempering
+    let has_pr = stop && !med && crate::github::get_prs(app.state()).prs.contains_key(task);
     let (mut quality, mut ready, mut picked) = (None, None, None);
     let root = settings::dir(app).map(|d| settings::load(&d).repos_root).unwrap_or_default();
     let note = update(app, |g| {
@@ -146,13 +162,13 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
         }
         let (mut st, q) = hooks::next_status(s.status, ev);
         let was = s.status;
-        if stop && s.worktree.is_empty() {
+        if stop && !med && s.worktree.is_empty() {
             // repo-pick session in repos_root: a valid MURIM_REPO line moves the task into its worktree, else ask the user
             picked = hooks::repo_marker(ev["last_assistant_message"].as_str().unwrap_or_default(), Path::new(&root)).map(|p| (p, s.permission_mode));
             if picked.is_none() {
                 st = Status::NeedsInput;
             }
-        } else if stop {
+        } else if stop && !med {
             let tt = std::mem::take(&mut s.tempering_turn);
             match hooks::on_stop(s.pr_flow, ev["last_assistant_message"].as_str().unwrap_or_default(), has_pr, tt) {
                 StopOutcome::Idle => {}
@@ -206,7 +222,7 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
             }
         });
     }
-    if stop {
+    if stop && !med {
         let (a, t) = (app.clone(), task.to_string());
         std::thread::spawn(move || crate::tempering::consume(&a, &t));
         crate::github::poke(app);
@@ -366,6 +382,14 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
         (s.worktree.clone(), s.permission_mode, s.agent, s.agent_command.clone())
     };
     let custom = agent == AgentKind::Custom;
+    // meditation: artifacts folder for Claude (--add-dir + system prompt) or custom agents (MURIM_ARTIFACTS); also on resume
+    let arts = if is_meditation(issue_id) {
+        let d = settings::meditations_dir(&settings::load(&settings::dir(app)?));
+        std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+        Some(d.to_string_lossy().into_owned())
+    } else {
+        None
+    };
     let (vars, claude) = shell_env();
     let hk = app.state::<Hooks>();
     let pair = native_pty_system().openpty(PtySize { rows: 40, cols: 120, pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string())?;
@@ -379,7 +403,11 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
         let claude = claude.clone().or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.local/bin/claude")).filter(|p| Path::new(p).exists())).ok_or("claude not found on PATH (login shell)")?;
         let mut c = CommandBuilder::new(claude);
         c.args(head);
-        if wt.is_empty() {
+        if let Some(d) = &arts {
+            // hooks via --settings: nothing written into repos_root
+            let sys = format!("Save documents worth keeping (plans, explanations, notes) as markdown files in {d}, with a descriptive kebab-case filename and a # title.");
+            c.args(["--settings", &merge_hooks(json!({})).to_string(), "--add-dir", d, "--append-system-prompt", &sys]);
+        } else if wt.is_empty() {
             // repo-pick session: hooks via --settings (nothing written into repos_root), no file edits
             c.args(["--settings", &merge_hooks(json!({})).to_string(), "--disallowedTools", "Edit,Write,NotebookEdit"]);
         }
@@ -401,6 +429,9 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
     c.env("MURIM_PORT", hk.port.to_string());
     c.env("MURIM_TOKEN", &hk.token);
     c.env("MURIM_TASK", issue_id);
+    if let (true, Some(d)) = (custom, &arts) {
+        c.env("MURIM_ARTIFACTS", d);
+    }
     let child = pair.slave.spawn_command(c).map_err(|e| e.to_string())?;
     let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
@@ -585,7 +616,7 @@ pub fn start_task(app: AppHandle, issue_id: String, permission_mode: PermissionM
             return Err("already running".to_string());
         }
         let old = g.map.get(&issue_id).cloned();
-        g.map.insert(issue_id.clone(), SessionInfo { issue_id: issue_id.clone(), worktree: wt, session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode, tempering: !custom && old.as_ref().is_some_and(|o| o.tempering), escalations: vec![], pr_flow: old.as_ref().map(|o| o.pr_flow).unwrap_or_default(), agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), tempering_turn: false, memory: old.map(|o| o.memory).unwrap_or_default() });
+        g.map.insert(issue_id.clone(), SessionInfo { issue_id: issue_id.clone(), worktree: wt, session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode, tempering: !custom && old.as_ref().is_some_and(|o| o.tempering), escalations: vec![], pr_flow: old.as_ref().map(|o| o.pr_flow).unwrap_or_default(), agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), name: String::new(), tempering_turn: false, memory: old.map(|o| o.memory).unwrap_or_default() });
         Ok(())
     })?;
     spawn(&app, &issue_id, vec![prompt])
@@ -626,6 +657,15 @@ pub fn stop_task(app: AppHandle, issue_id: String) {
 
 /// Review-mode agent in a PR checkout. Same PTY/hook machinery as tasks, keyed `review:<owner>/<repo>/<n>`; no PR flow, no Tempering.
 pub fn start_review(app: &AppHandle, id: &str, wt: &str, prompt: String) -> Result<(), String> {
+    start_agent(app, id, wt, String::new(), vec![prompt])
+}
+
+/// Free-form agent in repos_root keyed `meditation:<hex>`, no initial prompt.
+pub fn start_meditation_session(app: &AppHandle, id: &str, name: String, repos_root: &str) -> Result<(), String> {
+    start_agent(app, id, repos_root, name, vec![])
+}
+
+fn start_agent(app: &AppHandle, id: &str, wt: &str, name: String, head: Vec<String>) -> Result<(), String> {
     let cfg = settings::load(&settings::dir(app)?);
     if cfg.agent == AgentKind::Custom && cfg.agent_command.trim().is_empty() {
         return Err("Set the agent command in Settings".into());
@@ -634,10 +674,10 @@ pub fn start_review(app: &AppHandle, id: &str, wt: &str, prompt: String) -> Resu
         if g.ptys.contains_key(id) {
             return Err("already running".to_string());
         }
-        g.map.insert(id.into(), SessionInfo { issue_id: id.into(), worktree: wt.into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode: cfg.default_permission_mode, tempering: false, escalations: vec![], memory: Default::default(), pr_flow: PrFlow::None, agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), tempering_turn: false });
+        g.map.insert(id.into(), SessionInfo { issue_id: id.into(), worktree: wt.into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode: cfg.default_permission_mode, tempering: false, escalations: vec![], memory: Default::default(), pr_flow: PrFlow::None, agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), name, tempering_turn: false });
         Ok(())
     })?;
-    spawn(app, id, vec![prompt])
+    spawn(app, id, head)
 }
 
 /// Kill a session's PTY and drop it (review dismissed / PR closed).

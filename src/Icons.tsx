@@ -68,6 +68,10 @@ export const ReviewsIcon = () => (
   <svg {...L}><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-3" /><path d="m14 4-2 2 2 2" /></svg>
 );
 
+export const MeditationsIcon = () => (
+  <svg {...L}><path d="M12 20c-4-2-6-5-6-9 3 0 5 2 6 4 1-2 3-4 6-4 0 4-2 7-6 9Z" /><path d="M12 15c-1.5-2-1.5-6 0-10 1.5 4 1.5 8 0 10" /><path d="M3 13c0 4 4 7 9 7s9-3 9-7" /></svg>
+);
+
 export const DownloadIcon = () => (
   <svg {...L}><path d="M12 3v12M7 10l5 5 5-5" /><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></svg>
 );

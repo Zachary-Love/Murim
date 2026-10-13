@@ -8,7 +8,11 @@ export type AgentKind = "claude" | "custom";
 // Claude Code's own names for what each mode passes to `claude`.
 export const MODE_LABEL: Record<Mode, string> = { normal: "Ask permissions", allowlist: "Accept edits + dev tools", skip: "Bypass permissions" };
 export type Status = "starting" | "working" | "needsInput" | "idle" | "ended";
-export type Session = { issueId: string; worktree: string; sessionId: string | null; status: Status; questions: unknown; ptyAlive: boolean; permissionMode: Mode; tempering?: boolean; escalations?: Escalation[]; prFlow?: string; agent?: AgentKind };
+export type Session = { issueId: string; worktree: string; sessionId: string | null; status: Status; questions: unknown; ptyAlive: boolean; permissionMode: Mode; tempering?: boolean; escalations?: Escalation[]; prFlow?: string; agent?: AgentKind; name?: string };
+// Meditations: free-form sessions keyed "meditation:<hex>" + markdown artifacts (backend meditations.rs)
+export type Artifact = { path: string; title: string; modified: number };
+export type MedSel = { kind: "session" | "artifact"; id: string };
+export const isMed = (id: string) => id.startsWith("meditation:");
 export type ReplyMode = "off" | "terse" | "full";
 export type Escalation = { id: string; threadId: string; path: string; comment: string; reason: string };
 export type LogEntry = { issueId: string; at: number | string; message: string };

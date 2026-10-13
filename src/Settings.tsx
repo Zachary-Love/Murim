@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { MODE_LABEL, AgentKind, ReplyMode } from "./types";
 
-type S = { agent: AgentKind; agent_command: string; repos_root: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off" };
+type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off" };
 
 export default function Settings() {
   const [s, setS] = useState<S | null>(null);
@@ -41,6 +41,15 @@ export default function Settings() {
           <button type="button" className="btn" onClick={async () => {
             const dir = await open({ directory: true, defaultPath: s.repos_root || undefined, title: "Choose your repos folder" });
             if (typeof dir === "string") setS({ ...s, repos_root: dir });
+          }}>Choose…</button>
+        </div>
+      </label>
+      <label>Meditations folder
+        <div className="group">
+          <input className="grow" value={s.meditations_dir ?? ""} placeholder="~/.murim/meditations" onChange={(e) => setS({ ...s, meditations_dir: e.target.value })} />
+          <button type="button" className="btn" onClick={async () => {
+            const dir = await open({ directory: true, defaultPath: s.meditations_dir || undefined, title: "Choose your meditations folder" });
+            if (typeof dir === "string") setS({ ...s, meditations_dir: dir });
           }}>Choose…</button>
         </div>
       </label>

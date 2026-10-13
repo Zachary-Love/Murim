@@ -240,8 +240,8 @@ fn poll(app: &AppHandle) {
     let old = gh.inner.lock().unwrap().payload.prs.clone();
     let (mut prs, mut error, mut details) = (HashMap::new(), None, vec![]);
     for (id, s) in &sess {
-        if id.starts_with("review:") {
-            continue; // review-mode checkouts are polled by reviews.rs
+        if sessions::no_pr_flow(id) {
+            continue; // review-mode checkouts are polled by reviews.rs; meditations have no PR
         }
         let wt = Path::new(&s.worktree);
         if !wt.exists() {

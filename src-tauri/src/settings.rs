@@ -42,6 +42,16 @@ pub struct Settings {
     pub review_filters: ReviewFilters,
     /// Requested-reviews indicator on the rail.
     pub review_badge: ReviewBadge,
+    /// Meditation artifacts folder; empty = ~/.murim/meditations.
+    pub meditations_dir: String,
+}
+
+pub fn meditations_dir(s: &Settings) -> PathBuf {
+    if s.meditations_dir.trim().is_empty() {
+        PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".murim/meditations")
+    } else {
+        PathBuf::from(s.meditations_dir.trim())
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug, Default)]
@@ -134,11 +144,13 @@ mod tests {
         let d = std::env::temp_dir().join(format!("murim-settings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         assert_eq!(load(&d), Settings::default()); // missing
-        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into(), review_filters: ReviewFilters { authors: vec!["u1".into(), "unlinked".into()], statuses: vec!["draft".into()] }, review_badge: ReviewBadge::Dot };
+        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into(), review_filters: ReviewFilters { authors: vec!["u1".into(), "unlinked".into()], statuses: vec!["draft".into()] }, review_badge: ReviewBadge::Dot, meditations_dir: "/m".into() };
         save(&d, &s).unwrap();
         assert_eq!(load(&d), s);
         std::fs::write(d.join("settings.json"), "{not json").unwrap();
         assert_eq!(load(&d), Settings::default()); // corrupt
+        assert_eq!(meditations_dir(&s), PathBuf::from("/m"));
+        assert!(meditations_dir(&Settings::default()).ends_with(".murim/meditations"));
         let _ = std::fs::remove_dir_all(&d);
     }
 }
