@@ -83,3 +83,7 @@ export const ClockIcon = () => (
 export const PlusIcon = () => (
   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="M6 1.5v9M1.5 6h9" /></svg>
 );
+
+export const RefreshIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10.2 6.6A4.2 4.2 0 1 1 9 3" /><path d="M9.4 1v2.4H7" /></svg>
+);

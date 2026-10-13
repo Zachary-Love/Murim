@@ -5,7 +5,7 @@ import Settings, { SettingsNav, Section } from "./Settings";
 import Caffeine from "./Caffeine";
 import Updater from "./Updater";
 import { Item, Repo, Session, Mode, AgentKind, LogEntry, PrMap, SEV, OVERALL, ReviewPr, MedSel, Automation, AutoSel, isAuto, sortItems, stage } from "./types";
-import { StateIcon, AgentIcon, PrIcon, GearIcon, FlameIcon, TasksIcon, ReviewsIcon, MeditationsIcon, ClockIcon } from "./Icons";
+import { StateIcon, AgentIcon, PrIcon, GearIcon, RefreshIcon, FlameIcon, TasksIcon, ReviewsIcon, MeditationsIcon, ClockIcon } from "./Icons";
 import TaskPane from "./TaskPane";
 import ReviewList from "./ReviewList";
 import ReviewPane from "./ReviewPane";
@@ -106,10 +106,10 @@ export default function App() {
         ) : view === "meditations" ? (
           <MeditationList {...med} sessions={sessions} sel={showSettings ? null : openMed} onOpen={(m) => { setOpenMed(m); setShowSettings(false); }} noRepos={reposRoot === ""} />
         ) : view === "reviews" ? <>
-        <div className="section-label">Reviews <span className="count">{rv.prs.length}</span><button className="btn ghost new" title="Refresh reviews" onClick={() => invoke("refresh_reviews").catch(() => {})}>↻</button></div>
+        <div className="section-label">Reviews <span className="count">{rv.prs.length}</span><button className="btn ghost new" title="Refresh reviews" onClick={() => invoke("refresh_reviews").catch(() => {})}><RefreshIcon /></button></div>
         <ReviewList prs={rv.prs} error={rv.error} open={showSettings ? null : openReview} onOpen={(k) => { setOpenReview(k); setShowSettings(false); }} />
         </> : <>
-        <div className="section-label">My tasks <span className="count">{p.items.length}</span><button className="btn ghost new" title="Refresh tasks" onClick={() => invoke("refresh_inbox").catch(() => {})}>↻</button></div>
+        <div className="section-label">My tasks <span className="count">{p.items.length}</span><button className="btn ghost new" title="Refresh tasks" onClick={() => invoke("refresh_inbox").catch(() => {})}><RefreshIcon /></button></div>
         {p.error && <div className="banner">{p.error}</div>}
         {prErr && <div className="banner">{prErr}</div>}
         <ul className="tasks">
