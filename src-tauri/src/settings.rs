@@ -40,6 +40,17 @@ pub struct Settings {
     pub repo_map: std::collections::HashMap<String, String>,
     /// Last-used Reviews filters.
     pub review_filters: ReviewFilters,
+    /// Requested-reviews indicator on the rail.
+    pub review_badge: ReviewBadge,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewBadge {
+    #[default]
+    Count,
+    Dot,
+    Off,
 }
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug, Default)]
@@ -114,7 +125,7 @@ mod tests {
         let d = std::env::temp_dir().join(format!("murim-settings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         assert_eq!(load(&d), Settings::default()); // missing
-        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into(), review_filters: ReviewFilters { authors: vec!["u1".into(), "unlinked".into()], statuses: vec!["draft".into()] } };
+        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into(), review_filters: ReviewFilters { authors: vec!["u1".into(), "unlinked".into()], statuses: vec!["draft".into()] }, review_badge: ReviewBadge::Dot };
         save(&d, &s).unwrap();
         assert_eq!(load(&d), s);
         std::fs::write(d.join("settings.json"), "{not json").unwrap();

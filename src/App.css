@@ -208,6 +208,7 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 /* reviews list: Linear-style filter bar */
 .rail .btn.icon { position: relative; }
 .rail .badge { position: absolute; top: 2px; right: -2px; min-width: 15px; line-height: 14px; text-align: center; font-weight: 600; }
+.rail .badge-dot { position: absolute; top: 5px; right: 4px; }
 .filter-bar { display: flex; align-items: center; gap: 6px; padding: 4px 12px 6px; }
 .filter-bar .btn { height: 24px; padding: 0 8px; font-size: 11px; }
 .filter-bar .anchor { position: relative; }

@@ -24,6 +24,7 @@ export default function App() {
   const [sessions, setSessions] = useState<Record<string, Session>>({});
   const [mode, setMode] = useState<Mode>("normal");
   const [agent, setAgent] = useState<AgentKind>("claude");
+  const [badge, setBadge] = useState<"count" | "dot" | "off">("count");
   const [prs, setPrs] = useState<PrMap>({});
   const [prErr, setPrErr] = useState<string | null>(null);
   const [logs, setLogs] = useState<Record<string, LogEntry[]>>({});
@@ -51,7 +52,7 @@ export default function App() {
   // re-read when Settings closes so a new default mode / agent applies without a restart
   useEffect(() => {
     if (showSettings) return;
-    invoke<{ default_permission_mode: Mode; agent: AgentKind }>("get_settings").then((s) => { setMode(s.default_permission_mode); setAgent(s.agent); }).catch(() => {});
+    invoke<{ default_permission_mode: Mode; agent: AgentKind; review_badge: typeof badge }>("get_settings").then((s) => { setMode(s.default_permission_mode); setAgent(s.agent); setBadge(s.review_badge); }).catch(() => {});
   }, [showSettings]);
   const openItem = p.items.find((i) => i.issue.id === open);
   const requested = rv.prs.filter((r) => r.requested).length;
@@ -61,7 +62,7 @@ export default function App() {
     <div className="app">
       <nav className="rail" data-tauri-drag-region>
         <button className={`btn icon ${view === "tasks" ? "on" : ""}`} title="Tasks" onClick={() => switchView("tasks")}><TasksIcon /></button>
-        <button className={`btn icon ${view === "reviews" ? "on" : ""}`} title="Reviews" onClick={() => switchView("reviews")}><ReviewsIcon />{requested > 0 && <span className="count attn badge">{requested}</span>}</button>
+        <button className={`btn icon ${view === "reviews" ? "on" : ""}`} title="Reviews" onClick={() => switchView("reviews")}><ReviewsIcon />{requested > 0 && badge !== "off" && (badge === "dot" ? <span className="dot-req badge-dot" /> : <span className="count attn badge">{requested}</span>)}</button>
         <div className="rail-bottom">
           <Updater />
           <Caffeine />

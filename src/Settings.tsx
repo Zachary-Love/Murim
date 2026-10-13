@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { MODE_LABEL, AgentKind, ReplyMode } from "./types";
 
-type S = { agent: AgentKind; agent_command: string; repos_root: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; reply_mode: ReplyMode };
+type S = { agent: AgentKind; agent_command: string; repos_root: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off" };
 
 export default function Settings() {
   const [s, setS] = useState<S | null>(null);
@@ -81,6 +81,13 @@ export default function Settings() {
         </select>
       </label>
       </>}
+      <label>Review requests badge
+        <select value={s.review_badge} onChange={(e) => setS({ ...s, review_badge: e.target.value as S["review_badge"] })}>
+          <option value="count">Number</option>
+          <option value="dot">Dot</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
       <label>Linear API key {hasKey && <span className="chip green">saved</span>}
         <input type="password" value={key} placeholder={hasKey ? "enter to replace" : ""}
           onChange={(e) => setKey(e.target.value)} />
