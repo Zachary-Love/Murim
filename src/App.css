@@ -264,3 +264,18 @@ button.chip:hover { background: var(--hover); border-color: #525252; color: var(
 .pane-title.path { display: block; font-weight: 400; font-size: 12px; color: var(--muted); text-overflow: ellipsis; }
 .pane-title.path { flex: 1; } .pane-title.path + .topbar-right { flex: none; }
 .md table { border-collapse: collapse; margin: 8px 0; } .md th, .md td { padding: 4px 10px; border: 1px solid var(--line); text-align: left; }
+
+/* automations */
+.autos .row { height: auto; min-height: 30px; flex-wrap: wrap; row-gap: 0; padding: 4px 8px; }
+.autos .row.off { opacity: .5; }
+.autos .sub { flex-basis: 100%; font-size: 11px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+.auto-edit { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 24px; }
+.auto-edit .settings label.check { flex-direction: row; align-items: center; gap: 8px; color: var(--text-2); }
+.auto-edit input[type=checkbox] { height: auto; accent-color: var(--brand); }
+.auto-edit input[type=date], .auto-edit input[type=number] { align-self: flex-start; }
+.days .btn { width: 28px; padding: 0; justify-content: center; }
+.runs-label { max-width: 460px; padding: 20px 0 4px; }
+.runs { max-width: 460px; padding: 0; }
+.runs .row:disabled { cursor: default; }
+.runs .st { font-size: 11px; color: var(--dim); }
+.runs .st.running { color: var(--blue); } .runs .st.waiting { color: var(--brand); } .runs .st.failed { color: var(--red); }

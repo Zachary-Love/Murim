@@ -19,6 +19,10 @@ list, puts Claude Code to work on a task with one button, and babysits the PR to
   ("how does X work?", "plan Y across my stack"). Sessions get a random name you can rename. The agent saves anything
   worth keeping as markdown in the Meditations folder (Settings, default `~/.murim/meditations`); Murim lists and
   searches those artifacts and renders them. Meditations use your Settings permission mode, on your real checkouts.
+- **Automations** — scheduled agent runs: a prompt, a folder and a schedule (daily, weekdays, weekly, every 2 weeks
+  from a start date, or monthly). Each run is its own session you can open. When a run waits on you (e.g. Claude asks
+  before sending an email) you get a "<name> needs you" notification and a dot on the rail. Murim must be open and
+  the Mac awake; a run missed within 24h runs once on launch/wake, older ones show as missed.
 - **Caffeine** — keeps the Mac awake while flows run.
 
 macOS only for now. Version 0.1.0 is early software.

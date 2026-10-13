@@ -105,17 +105,26 @@ pub fn kill_all(app: &AppHandle) {
 
 // ---- hooks -> status ----
 
-/// Agent-only sessions (review, meditation): no PR polling, no Tempering.
+/// Agent-only sessions (review, meditation, automation): no PR polling, no Tempering.
 pub fn no_pr_flow(id: &str) -> bool {
-    id.starts_with("review:") || is_meditation(id)
+    id.starts_with("review:") || agent_only(id)
 }
 
 pub fn is_meditation(id: &str) -> bool {
     id.starts_with("meditation:")
 }
 
+pub fn is_automation(id: &str) -> bool {
+    id.starts_with("automation:")
+}
+
+/// Status + notifications only: no repo pick, markers, PR flow or Tempering; hooks via --settings.
+fn agent_only(id: &str) -> bool {
+    is_meditation(id) || is_automation(id)
+}
+
 pub fn title_of(s: &SessionInfo) -> String {
-    if is_meditation(&s.issue_id) {
+    if agent_only(&s.issue_id) {
         return s.name.clone();
     }
     if let Some(pr) = s.issue_id.strip_prefix("review:") {
@@ -148,7 +157,7 @@ pub fn changes_prompt(feedback: &str) -> String {
 
 pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
     let stop = ev["hook_event_name"] == "Stop";
-    let med = is_meditation(task); // status + notifications only: no repo pick, markers, PR flow or Tempering
+    let med = agent_only(task);
     let has_pr = stop && !med && crate::github::get_prs(app.state()).prs.contains_key(task);
     let (mut quality, mut ready, mut picked) = (None, None, None);
     let root = settings::dir(app).map(|d| settings::load(&d).repos_root).unwrap_or_default();
@@ -188,7 +197,7 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
         }
         (st == Status::NeedsInput && was != Status::NeedsInput).then(|| {
             let text = if stop { "Claude stopped — reply needed?" } else { s.questions.as_ref().and_then(|q| q[0]["question"].as_str()).or(ev["message"].as_str()).unwrap_or("Needs your input") };
-            (title_of(s), text.to_string())
+            (if is_automation(&s.issue_id) { format!("{} needs you", s.name) } else { title_of(s) }, text.to_string())
         })
     });
     if let Some((t, b)) = note {
@@ -407,6 +416,8 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
             // hooks via --settings: nothing written into repos_root
             let sys = format!("Save documents worth keeping (plans, explanations, notes) as markdown files in {d}, with a descriptive kebab-case filename and a # title.");
             c.args(["--settings", &merge_hooks(json!({})).to_string(), "--add-dir", d, "--append-system-prompt", &sys]);
+        } else if is_automation(issue_id) {
+            c.args(["--settings", &merge_hooks(json!({})).to_string()]); // also on resume
         } else if wt.is_empty() {
             // repo-pick session: hooks via --settings (nothing written into repos_root), no file edits
             c.args(["--settings", &merge_hooks(json!({})).to_string(), "--disallowedTools", "Edit,Write,NotebookEdit"]);
@@ -663,6 +674,25 @@ pub fn start_review(app: &AppHandle, id: &str, wt: &str, prompt: String) -> Resu
 /// Free-form agent in repos_root keyed `meditation:<hex>`, no initial prompt.
 pub fn start_meditation_session(app: &AppHandle, id: &str, name: String, repos_root: &str) -> Result<(), String> {
     start_agent(app, id, repos_root, name, vec![])
+}
+
+/// Scheduled/manual run keyed `automation:<auto-id>:<run-id>`; prompt is the first message. `folder` "" = repos_root.
+pub fn start_automation_session(app: &AppHandle, id: &str, name: String, folder: &str, prompt: &str) -> Result<(), String> {
+    let cfg = settings::load(&settings::dir(app)?);
+    let dir = if folder.trim().is_empty() { cfg.repos_root.clone() } else { folder.trim().to_string() };
+    if dir.is_empty() {
+        return Err("Set your repos folder in Settings".into());
+    }
+    if !Path::new(&dir).is_dir() {
+        return Err(format!("Folder not found: {dir}"));
+    }
+    let extra = cfg.default_prompt.trim();
+    let extra = if extra.is_empty() { String::new() } else { format!("\n\nInstructions:\n{extra}") };
+    start_agent(app, id, &dir, name, vec![format!("{prompt}{extra}")])
+}
+
+pub fn pty_alive(app: &AppHandle, id: &str) -> bool {
+    sessions(app).0.lock().unwrap().ptys.contains_key(id)
 }
 
 fn start_agent(app: &AppHandle, id: &str, wt: &str, name: String, head: Vec<String>) -> Result<(), String> {

@@ -7,14 +7,15 @@ import { Session } from "./types";
 import { AgentIcon } from "./Icons";
 import logo from "./assets/logo-mark.svg";
 
-export function SessionPane({ id, session }: { id: string; session: Session }) {
+// Shared by Meditations and Automations runs.
+export function SessionPane({ id, session, title, noun = "meditation" }: { id: string; session: Session; title?: string; noun?: string }) {
   const [err, setErr] = useState("");
   const run = (cmd: string, args: object = {}) => invoke(cmd, { issueId: id, ...args }).then(() => setErr("")).catch((e) => setErr(String(e)));
   const resume = () => run("resume_task", { prompt: null });
   return (
     <div className="pane">
       <header className="topbar" data-tauri-drag-region>
-        <span className="pane-title" data-tauri-drag-region>{session.name || id}<AgentIcon status={session.status} /></span>
+        <span className="pane-title" data-tauri-drag-region>{title ?? (session.name || id)}<AgentIcon status={session.status} /></span>
         <div className="topbar-right" data-tauri-drag-region>
           {session.ptyAlive
             ? <button className="btn danger" onClick={() => run("stop_task")}>■ Stop agent</button>
@@ -25,7 +26,7 @@ export function SessionPane({ id, session }: { id: string; session: Session }) {
       {session.ptyAlive ? <Terminal key={id} issueId={id} /> : (
         <div className="empty-state">
           <img className="logo-lg" src={logo} alt="" />
-          <p>The agent isn't running for this meditation.</p>
+          <p>The agent isn't running for this {noun}.</p>
           <button className="btn primary" onClick={resume}>↻ Resume agent</button>
         </div>
       )}

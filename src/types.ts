@@ -65,3 +65,29 @@ export type ReviewPr = {
 export type ReviewFilters = { authors: string[]; statuses: Bucket[] };
 export const BUCKET_LABEL: Record<Bucket, string> = { needsReview: "Needs review", draft: "Draft", ciFailing: "CI failing", changesRequested: "Changes requested", approved: "Approved" };
 export type Draft = { summary: string; event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; comments: { path: string; line: number; body: string }[] };
+
+// Automations: scheduled runs (backend automations.rs). A run is a session keyed "automation:<auto-id>:<run-id>".
+export type Schedule = { kind: "daily" | "weekdays" | "weekly" | "biweekly" | "monthly"; time: string; days: number[]; start: string; dayOfMonth: number };
+export type AutoRun = { id: string; started: number; status: "started" | "failed" | "missed" | "skipped"; error?: string | null; sessionId: string | null };
+export type Automation = { id: string; name: string; prompt: string; folder: string; schedule: Schedule; enabled: boolean; nextDue: number | null; runs: AutoRun[] };
+export type AutoSel = { kind: "automation" | "run"; id: string }; // run: id = its sessionId
+export const isAuto = (id: string) => id.startsWith("automation:");
+export type RunStatus = "running" | "waiting" | "done" | "failed" | "missed" | "skipped";
+export const runStatus = (r: AutoRun, m: Record<string, Session>): RunStatus => {
+  if (r.status !== "started") return r.status;
+  const s = r.sessionId ? m[r.sessionId] : undefined;
+  return s?.status === "needsInput" ? "waiting" : live(s) ? "running" : "done";
+};
+export const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const hm = (t: string) => t.replace(/^0(\d)/, "$1");
+export const scheduleText = (s: Schedule) => {
+  const d = [...s.days].sort().map((i) => DAYS[i]).join(", ");
+  return s.kind === "daily" ? `Daily ${hm(s.time)}` : s.kind === "weekdays" ? `Weekdays ${hm(s.time)}`
+    : s.kind === "monthly" ? `Monthly · day ${s.dayOfMonth} ${hm(s.time)}`
+    : `${s.kind === "weekly" ? "Weekly" : "Every 2 weeks"} · ${d} ${hm(s.time)}`;
+};
+export const until = (secs: number | null) => {
+  if (secs == null) return "—";
+  const s = secs - Date.now() / 1000;
+  return s < 60 ? "now" : s < 3600 ? `in ${Math.floor(s / 60)}m` : s < 86400 ? `in ${Math.floor(s / 3600)}h` : `in ${Math.floor(s / 86400)}d`;
+};

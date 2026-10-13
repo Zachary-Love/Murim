@@ -4,20 +4,22 @@ import { listen } from "@tauri-apps/api/event";
 import Settings from "./Settings";
 import Caffeine from "./Caffeine";
 import Updater from "./Updater";
-import { Item, Repo, Session, Mode, AgentKind, LogEntry, PrMap, SEV, OVERALL, ReviewPr, MedSel, sortItems, stage } from "./types";
-import { StateIcon, AgentIcon, PrIcon, GearIcon, FlameIcon, TasksIcon, ReviewsIcon, MeditationsIcon } from "./Icons";
+import { Item, Repo, Session, Mode, AgentKind, LogEntry, PrMap, SEV, OVERALL, ReviewPr, MedSel, Automation, AutoSel, isAuto, sortItems, stage } from "./types";
+import { StateIcon, AgentIcon, PrIcon, GearIcon, FlameIcon, TasksIcon, ReviewsIcon, MeditationsIcon, ClockIcon } from "./Icons";
 import TaskPane from "./TaskPane";
 import ReviewList from "./ReviewList";
 import ReviewPane from "./ReviewPane";
 import MeditationList, { useArtifacts } from "./MeditationList";
 import { SessionPane, ArtifactPane } from "./MeditationPane";
+import AutomationList from "./AutomationList";
+import AutomationPane, { RunPane, draft } from "./AutomationPane";
 import logo from "./assets/logo-mark.svg";
 
 type Payload = { items: Item[]; error: string | null };
 type PrPayload = { prs: PrMap; error?: string | null };
 type RvPayload = { prs: ReviewPr[]; error: string | null };
-type View = "tasks" | "reviews" | "meditations";
-const savedView = (): View => { try { const v = localStorage.getItem("murim.view"); return v === "reviews" || v === "meditations" ? v : "tasks"; } catch { return "tasks"; } };
+type View = "tasks" | "reviews" | "meditations" | "automations";
+const savedView = (): View => { try { const v = localStorage.getItem("murim.view"); return v === "reviews" || v === "meditations" || v === "automations" ? v : "tasks"; } catch { return "tasks"; } };
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false);
@@ -35,6 +37,8 @@ export default function App() {
   const [openReview, setOpenReview] = useState<string | null>(null); // a ReviewPr.key; kept apart from `open` so each mode keeps its selection
   const [rv, setRv] = useState<RvPayload>({ prs: [], error: null });
   const [openMed, setOpenMed] = useState<MedSel | null>(null);
+  const [autos, setAutos] = useState<Automation[]>([]);
+  const [openAuto, setOpenAuto] = useState<AutoSel | null>(null);
   const [reposRoot, setReposRoot] = useState<string | null>(null);
   const med = useArtifacts(view === "meditations", sessions);
   const switchView = (v: View) => { setView(v); setShowSettings(false); try { localStorage.setItem("murim.view", v); } catch {} };
@@ -49,11 +53,13 @@ export default function App() {
     const up = listen<PrPayload>("prs-updated", (e) => setPp(e.payload));
     invoke<RvPayload>("get_reviews").then(setRv).catch(() => {});
     const ur = listen<RvPayload>("reviews-updated", (e) => setRv(e.payload));
+    invoke<Automation[]>("list_automations").then(setAutos).catch(() => {});
+    const ua = listen<Automation[]>("automations-updated", (e) => setAutos(e.payload));
     const onBadge = (e: Event) => setBadge((e as CustomEvent).detail);
     window.addEventListener("murim-badge", onBadge);
     const ul = listen<LogEntry>("tempering-log", (e) =>
       setLogs((l) => ({ ...l, [e.payload.issueId]: [e.payload, ...(l[e.payload.issueId] ?? [])].slice(0, 20) })));
-    return () => { window.removeEventListener("murim-badge", onBadge); ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); ur.then((f) => f()); };
+    return () => { window.removeEventListener("murim-badge", onBadge); ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); ur.then((f) => f()); ua.then((f) => f()); };
   }, []);
 
   // re-read when Settings closes so a new default mode / agent applies without a restart
@@ -64,6 +70,10 @@ export default function App() {
   const openItem = p.items.find((i) => i.issue.id === open);
   const requested = rv.prs.filter((r) => r.requested).length;
   const openPr = rv.prs.find((r) => r.key === openReview);
+  const autoWaiting = Object.values(sessions).some((s) => isAuto(s.issueId) && s.status === "needsInput");
+  const runAuto = openAuto?.kind === "run" ? autos.find((a) => a.runs.some((r) => r.sessionId === openAuto.id)) : undefined;
+  const selAuto = showSettings ? null : openAuto?.kind === "automation" ? openAuto.id : runAuto?.id ?? null;
+  const editAuto = openAuto?.kind === "automation" ? (openAuto.id ? autos.find((a) => a.id === openAuto.id) : draft()) : undefined;
   const medSession = openMed?.kind === "session" ? sessions[openMed.id] : undefined;
 
   return (
@@ -72,6 +82,7 @@ export default function App() {
         <button className={`btn icon ${view === "tasks" ? "on" : ""}`} title="Tasks" onClick={() => switchView("tasks")}><TasksIcon /></button>
         <button className={`btn icon ${view === "reviews" ? "on" : ""}`} title="Reviews" onClick={() => switchView("reviews")}><ReviewsIcon />{requested > 0 && badge !== "off" && (badge === "dot" ? <span className="dot-req badge-dot" /> : <span className="count attn badge">{requested}</span>)}</button>
         <button className={`btn icon ${view === "meditations" ? "on" : ""}`} title="Meditations" onClick={() => switchView("meditations")}><MeditationsIcon /></button>
+        <button className={`btn icon ${view === "automations" ? "on" : ""}`} title="Automations" onClick={() => switchView("automations")}><ClockIcon />{autoWaiting && <span className="dot-req badge-dot" />}</button>
         <div className="rail-bottom">
           <Updater />
           <Caffeine />
@@ -82,7 +93,9 @@ export default function App() {
         <header className="brand" data-tauri-drag-region>
           <h1 data-tauri-drag-region><img className="logo" src={logo} alt="" />Murim</h1>
         </header>
-        {view === "meditations" ? (
+        {view === "automations" ? (
+          <AutomationList autos={autos} sessions={sessions} selAuto={selAuto} onOpen={(a) => { setOpenAuto(a); setShowSettings(false); }} />
+        ) : view === "meditations" ? (
           <MeditationList {...med} sessions={sessions} sel={showSettings ? null : openMed} onOpen={(m) => { setOpenMed(m); setShowSettings(false); }} noRepos={reposRoot === ""} />
         ) : view === "reviews" ? <>
         <div className="section-label">Reviews <span className="count">{rv.prs.length}</span><button className="btn ghost new" title="Refresh reviews" onClick={() => invoke("refresh_reviews").catch(() => {})}>↻</button></div>
@@ -113,7 +126,12 @@ export default function App() {
         </>}
       </aside>
       <main className="main">
-        {showSettings ? <Settings /> : view === "meditations" ? (
+        {showSettings ? <Settings /> : view === "automations" ? (
+          editAuto ? <AutomationPane key={openAuto!.id} auto={editAuto} sessions={sessions} onOpen={setOpenAuto}
+            onSaved={(a) => { setAutos((l) => l.some((x) => x.id === a.id) ? l.map((x) => x.id === a.id ? a : x) : [...l, a]); setOpenAuto({ kind: "automation", id: a.id }); }} />
+          : openAuto?.kind === "run" ? <RunPane key={openAuto.id} id={openAuto.id} auto={runAuto} session={sessions[openAuto.id]} />
+          : <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Select an automation or create one.</p></div>
+        ) : view === "meditations" ? (
           medSession ? <SessionPane key={openMed!.id} id={openMed!.id} session={medSession} />
           : openMed?.kind === "artifact" ? <ArtifactPane key={openMed.id} path={openMed.id} modified={med.arts.find((a) => a.path === openMed.id)?.modified} />
           : <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Start a meditation or open an artifact.</p></div>
