@@ -81,15 +81,14 @@ export default function App() {
       <aside className="sidebar">
         <header className="brand" data-tauri-drag-region>
           <h1 data-tauri-drag-region><img className="logo" src={logo} alt="" />Murim</h1>
-          <button className="btn icon" title={`Refresh ${view}`} onClick={() => view === "meditations" ? med.reload() : invoke(view === "tasks" ? "refresh_inbox" : "refresh_reviews").catch(() => {})}>↻</button>
         </header>
         {view === "meditations" ? (
           <MeditationList {...med} sessions={sessions} sel={showSettings ? null : openMed} onOpen={(m) => { setOpenMed(m); setShowSettings(false); }} noRepos={reposRoot === ""} />
         ) : view === "reviews" ? <>
-        <div className="section-label">Reviews <span className="count">{rv.prs.length}</span></div>
+        <div className="section-label">Reviews <span className="count">{rv.prs.length}</span><button className="btn ghost new" title="Refresh reviews" onClick={() => invoke("refresh_reviews").catch(() => {})}>↻</button></div>
         <ReviewList prs={rv.prs} error={rv.error} open={showSettings ? null : openReview} onOpen={(k) => { setOpenReview(k); setShowSettings(false); }} />
         </> : <>
-        <div className="section-label">My tasks <span className="count">{p.items.length}</span></div>
+        <div className="section-label">My tasks <span className="count">{p.items.length}</span><button className="btn ghost new" title="Refresh tasks" onClick={() => invoke("refresh_inbox").catch(() => {})}>↻</button></div>
         {p.error && <div className="banner">{p.error}</div>}
         {prErr && <div className="banner">{prErr}</div>}
         <ul className="tasks">
