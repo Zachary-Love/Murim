@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import Settings from "./Settings";
+import Settings, { SettingsNav, Section } from "./Settings";
 import Caffeine from "./Caffeine";
 import Updater from "./Updater";
 import { Item, Repo, Session, Mode, AgentKind, LogEntry, PrMap, SEV, OVERALL, ReviewPr, MedSel, Automation, AutoSel, isAuto, sortItems, stage } from "./types";
@@ -23,6 +23,7 @@ const savedView = (): View => { try { const v = localStorage.getItem("murim.view
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<Section>("Appearance");
   const [p, setP] = useState<Payload>({ items: [], error: null });
   const [repos, setRepos] = useState<Repo[]>([]);
   const [sessions, setSessions] = useState<Record<string, Session>>({});
@@ -84,10 +85,10 @@ export default function App() {
   return (
     <div className="app">
       <nav className="rail" data-tauri-drag-region>
-        <button className={`btn icon ${view === "tasks" ? "on" : ""}`} title="Tasks" onClick={() => switchView("tasks")}><TasksIcon /></button>
-        <button className={`btn icon ${view === "reviews" ? "on" : ""}`} title="Reviews" onClick={() => switchView("reviews")}><ReviewsIcon />{requested > 0 && badge !== "off" && (badge === "dot" ? <span className="dot-req badge-dot" /> : <span className="count attn badge">{requested}</span>)}</button>
-        <button className={`btn icon ${view === "meditations" ? "on" : ""}`} title="Meditations" onClick={() => switchView("meditations")}><MeditationsIcon /></button>
-        <button className={`btn icon ${view === "automations" ? "on" : ""}`} title="Automations" onClick={() => switchView("automations")}><ClockIcon />{autoWaiting && <span className="dot-req badge-dot" />}</button>
+        <button className={`btn icon ${!showSettings && view === "tasks" ? "on" : ""}`} title="Tasks" onClick={() => switchView("tasks")}><TasksIcon /></button>
+        <button className={`btn icon ${!showSettings && view === "reviews" ? "on" : ""}`} title="Reviews" onClick={() => switchView("reviews")}><ReviewsIcon />{requested > 0 && badge !== "off" && (badge === "dot" ? <span className="dot-req badge-dot" /> : <span className="count attn badge">{requested}</span>)}</button>
+        <button className={`btn icon ${!showSettings && view === "meditations" ? "on" : ""}`} title="Meditations" onClick={() => switchView("meditations")}><MeditationsIcon /></button>
+        <button className={`btn icon ${!showSettings && view === "automations" ? "on" : ""}`} title="Automations" onClick={() => switchView("automations")}><ClockIcon />{autoWaiting && <span className="dot-req badge-dot" />}</button>
         <div className="rail-bottom">
           <Updater />
           <Caffeine />
@@ -98,7 +99,9 @@ export default function App() {
         <header className="brand" data-tauri-drag-region>
           <h1 data-tauri-drag-region><img className="logo" src={logo} alt="" />Murim</h1>
         </header>
-        {view === "automations" ? (
+        {showSettings ? (
+          <SettingsNav tab={settingsTab} onTab={setSettingsTab} />
+        ) : view === "automations" ? (
           <AutomationList autos={autos} sessions={sessions} selAuto={selAuto} onOpen={(a) => { setOpenAuto(a); setShowSettings(false); }} />
         ) : view === "meditations" ? (
           <MeditationList {...med} sessions={sessions} sel={showSettings ? null : openMed} onOpen={(m) => { setOpenMed(m); setShowSettings(false); }} noRepos={reposRoot === ""} />
@@ -131,7 +134,7 @@ export default function App() {
         </>}
       </aside>
       <main className="main">
-        {showSettings ? <Settings /> : view === "automations" ? (
+        {showSettings ? <Settings tab={settingsTab} /> : view === "automations" ? (
           editAuto ? <AutomationPane key={openAuto!.id} auto={editAuto} sessions={sessions} onOpen={setOpenAuto}
             onSaved={(a) => { setAutos((l) => l.some((x) => x.id === a.id) ? l.map((x) => x.id === a.id ? a : x) : [...l, a]); setOpenAuto({ kind: "automation", id: a.id }); }} />
           : openAuto?.kind === "run" ? <RunPane key={openAuto.id} id={openAuto.id} auto={runAuto} session={sessions[openAuto.id]} />

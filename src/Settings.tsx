@@ -5,7 +5,22 @@ import { MODE_LABEL, AgentKind, ReplyMode } from "./types";
 
 type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off" };
 
-export default function Settings() {
+export const SECTIONS = ["Appearance", "Prompts", "Folders", "AI", "Accounts"] as const;
+export type Section = typeof SECTIONS[number];
+
+export function SettingsNav({ tab, onTab }: { tab: Section; onTab: (t: Section) => void }) {
+  return (
+    <>
+      <div className="section-label">Settings</div>
+      <ul className="tasks">
+        {SECTIONS.map((t) => <li key={t}><button className={`row ${tab === t ? "on" : ""}`} onClick={() => onTab(t)}><span className="t">{t}</span></button></li>)}
+      </ul>
+    </>
+  );
+}
+
+// Stays mounted across sections, so unsaved edits survive switching tabs; one Save covers them all.
+export default function Settings({ tab }: { tab: Section }) {
   const [s, setS] = useState<S | null>(null);
   const [key, setKey] = useState("");
   const [hasKey, setHasKey] = useState(false);
@@ -33,8 +48,13 @@ export default function Settings() {
   };
 
   return (
-    <form className="settings" onSubmit={(e) => { e.preventDefault(); save(); }}>
-      <h2>Settings</h2>
+    <form className="pane settings-page" onSubmit={(e) => { e.preventDefault(); save(); }}>
+      <header className="topbar" data-tauri-drag-region>
+        <h2 data-tauri-drag-region>{tab}</h2>
+        <div className="topbar-right"><span className="muted">{msg}</span>{tab !== "Appearance" && <button className="btn primary" type="submit">Save</button>}</div>
+      </header>
+      <div className="settings">
+      {tab === "Folders" && <>
       <label>Repos folder
         <div className="group">
           <input className="grow" value={s.repos_root} placeholder="Folder that contains your git repos" onChange={(e) => setS({ ...s, repos_root: e.target.value })} />
@@ -53,6 +73,8 @@ export default function Settings() {
           }}>Choose…</button>
         </div>
       </label>
+      </>}
+      {tab === "AI" && <>
       <label>Agent
         <select value={s.agent} onChange={(e) => setS({ ...s, agent: e.target.value as AgentKind })}>
           <option value="claude">Claude Code (full automation)</option>
@@ -69,9 +91,6 @@ export default function Settings() {
             the automatic quality pass and draft PR, or Tempering — those rely on Claude Code's hooks.</p>
         </>
       )}
-      <label>Default prompt
-        <textarea value={s.default_prompt} placeholder="Appended to every task prompt, e.g. run the tests before finishing" onChange={(e) => setS({ ...s, default_prompt: e.target.value })} />
-      </label>
       {s.agent === "claude" && <>
       <label>Default permission mode
         <select value={s.default_permission_mode}
@@ -90,6 +109,13 @@ export default function Settings() {
         </select>
       </label>
       </>}
+      </>}
+      {tab === "Prompts" && (
+      <label>Default prompt
+        <textarea value={s.default_prompt} placeholder="Appended to every task prompt, e.g. run the tests before finishing" onChange={(e) => setS({ ...s, default_prompt: e.target.value })} />
+      </label>
+      )}
+      {tab === "Appearance" && (
       <label>Review requests badge
         <select value={s.review_badge} onChange={(e) => {
           const badge = e.target.value as S["review_badge"];
@@ -101,11 +127,14 @@ export default function Settings() {
           <option value="off">Off</option>
         </select>
       </label>
+      )}
+      {tab === "Accounts" && (
       <label>Linear API key {hasKey && <span className="chip green">saved</span>}
         <input type="password" value={key} placeholder={hasKey ? "enter to replace" : ""}
           onChange={(e) => setKey(e.target.value)} />
       </label>
-      <div className="group"><button className="btn primary" type="submit">Save</button> <span className="muted">{msg}</span></div>
+      )}
+      </div>
     </form>
   );
 }
