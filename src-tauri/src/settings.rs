@@ -98,6 +98,15 @@ pub fn save_settings(app: AppHandle, mut settings: Settings) -> Result<(), Strin
     save(&d, &settings)
 }
 
+/// Applies immediately (no Save click), like the filters.
+#[tauri::command]
+pub fn set_review_badge(app: AppHandle, badge: ReviewBadge) -> Result<(), String> {
+    let d = dir(&app)?;
+    let mut s = load(&d);
+    s.review_badge = badge;
+    save(&d, &s)
+}
+
 #[tauri::command]
 pub fn set_review_filters(app: AppHandle, filters: ReviewFilters) -> Result<(), String> {
     let d = dir(&app)?;

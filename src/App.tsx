@@ -44,9 +44,11 @@ export default function App() {
     const up = listen<PrPayload>("prs-updated", (e) => setPp(e.payload));
     invoke<RvPayload>("get_reviews").then(setRv).catch(() => {});
     const ur = listen<RvPayload>("reviews-updated", (e) => setRv(e.payload));
+    const onBadge = (e: Event) => setBadge((e as CustomEvent).detail);
+    window.addEventListener("murim-badge", onBadge);
     const ul = listen<LogEntry>("tempering-log", (e) =>
       setLogs((l) => ({ ...l, [e.payload.issueId]: [e.payload, ...(l[e.payload.issueId] ?? [])].slice(0, 20) })));
-    return () => { ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); ur.then((f) => f()); };
+    return () => { window.removeEventListener("murim-badge", onBadge); ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); ur.then((f) => f()); };
   }, []);
 
   // re-read when Settings closes so a new default mode / agent applies without a restart

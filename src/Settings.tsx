@@ -82,7 +82,11 @@ export default function Settings() {
       </label>
       </>}
       <label>Review requests badge
-        <select value={s.review_badge} onChange={(e) => setS({ ...s, review_badge: e.target.value as S["review_badge"] })}>
+        <select value={s.review_badge} onChange={(e) => {
+          const badge = e.target.value as S["review_badge"];
+          setS({ ...s, review_badge: badge });
+          invoke("set_review_badge", { badge }).then(() => window.dispatchEvent(new CustomEvent("murim-badge", { detail: badge }))).catch((err) => setMsg(String(err)));
+        }}>
           <option value="count">Number</option>
           <option value="dot">Dot</option>
           <option value="off">Off</option>
