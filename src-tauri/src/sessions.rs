@@ -72,14 +72,24 @@ fn sessions(app: &AppHandle) -> &Sessions {
 
 /// Mutate under the lock, then persist + emit the full map.
 fn update<R>(app: &AppHandle, f: impl FnOnce(&mut Inner) -> R) -> R {
-    let mut g = sessions(app).0.lock().unwrap();
-    let r = f(&mut g);
-    if let Ok(d) = settings::dir(app) {
-        let _ = std::fs::create_dir_all(&d);
-        let _ = std::fs::write(d.join("sessions.json"), serde_json::to_string_pretty(&g.map).unwrap_or_default());
-    }
-    let _ = app.emit("sessions-updated", &g.map);
+    let (r, map) = {
+        let mut g = sessions(app).0.lock().unwrap();
+        let r = f(&mut g);
+        if let Ok(d) = settings::dir(app) {
+            let _ = std::fs::create_dir_all(&d);
+            let _ = std::fs::write(d.join("sessions.json"), serde_json::to_string_pretty(&g.map).unwrap_or_default());
+        }
+        let _ = app.emit("sessions-updated", &g.map);
+        (r, g.map.clone())
+    };
+    crate::tray::refresh(app, &map); // outside the lock: it reads the inbox
     r
+}
+
+impl Sessions {
+    pub fn snapshot(&self) -> HashMap<String, SessionInfo> {
+        self.0.lock().unwrap().map.clone()
+    }
 }
 
 /// Mutate one session (persist + emit); None if unknown.

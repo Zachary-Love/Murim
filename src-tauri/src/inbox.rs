@@ -133,6 +133,7 @@ pub fn find(app: &AppHandle, issue_id: &str) -> Option<InboxItem> {
 pub fn start(app: AppHandle) {
     std::thread::spawn(move || loop {
         poll(&app);
+        crate::tray::refresh(&app, &app.state::<crate::sessions::Sessions>().snapshot()); // task titles for the menu
         let (m, cv) = &state(&app).wake;
         let g = cv.wait_timeout_while(m.lock().unwrap(), Duration::from_secs(60), |woken| !*woken).unwrap().0;
         drop(g);

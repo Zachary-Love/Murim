@@ -9,6 +9,7 @@ mod sessions;
 mod tempering;
 mod review;
 mod reviews;
+mod tray;
 mod meditations;
 mod automations;
 
@@ -43,6 +44,7 @@ pub fn run() {
             inbox::start(app.handle().clone());
             github::start(app.handle().clone());
             reviews::start(app.handle().clone());
+            tray::start(app.handle())?;
             automations::start(app.handle().clone());
             Ok(())
         })

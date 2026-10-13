@@ -57,9 +57,14 @@ export default function App() {
     const ua = listen<Automation[]>("automations-updated", (e) => setAutos(e.payload));
     const onBadge = (e: Event) => setBadge((e as CustomEvent).detail);
     window.addEventListener("murim-badge", onBadge);
+    // menu bar item clicked: jump to that task / automation run
+    const nav = listen<{ view: View; id: string }>("navigate", ({ payload: p }) => {
+      switchView(p.view);
+      if (p.view === "tasks") setOpen(p.id); else setOpenAuto({ kind: "run", id: p.id });
+    });
     const ul = listen<LogEntry>("tempering-log", (e) =>
       setLogs((l) => ({ ...l, [e.payload.issueId]: [e.payload, ...(l[e.payload.issueId] ?? [])].slice(0, 20) })));
-    return () => { window.removeEventListener("murim-badge", onBadge); ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); ur.then((f) => f()); ua.then((f) => f()); };
+    return () => { nav.then((f) => f()); window.removeEventListener("murim-badge", onBadge); ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); ur.then((f) => f()); ua.then((f) => f()); };
   }, []);
 
   // re-read when Settings closes so a new default mode / agent applies without a restart
