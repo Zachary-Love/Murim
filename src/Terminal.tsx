@@ -5,8 +5,12 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
+const ANSI = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"];
+const ANSI_NAMES = [...ANSI, ...ANSI.map((c) => "bright" + c[0].toUpperCase() + c.slice(1))];
+type Profile = { background: string; foreground: string; cursor: string; selectionBackground: string; ansi: string[] };
+let profile: Promise<Profile | null> | null = null; // read once per app run
 const bytes = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-// iTerm2's default palette, so CLI colors look like the user's own terminal.
+// Fallback: iTerm2's default palette. Replaced by the user's own iTerm profile colours when there is one.
 const theme = {
   background: "#0a0a0a", foreground: "#e5e5e5", cursor: "#f43f5e", cursorAccent: "#0a0a0a", selectionBackground: "#f43f5e44",
   black: "#000000", red: "#c91b00", green: "#00c200", yellow: "#c7c400", blue: "#0225c7", magenta: "#c930c7", cyan: "#00c5c7", white: "#c7c7c7",
@@ -19,6 +23,13 @@ export default function Terminal({ issueId }: { issueId: string }) {
     const el = ref.current!;
     const fontFamily = getComputedStyle(el).getPropertyValue("--mono");
     const term = new XTerm({ fontSize: 12.5, fontFamily, cursorBlink: true, theme });
+    // match the user's terminal: their iTerm profile for the current light/dark appearance
+    (profile ??= invoke<Profile | null>("terminal_theme").catch(() => null)).then((p) => {
+      if (!p || dead) return;
+      term.options.theme = { ...theme, ...Object.fromEntries(p.ansi.map((c, i) => [ANSI_NAMES[i], c])), background: p.background, foreground: p.foreground,
+        cursor: p.cursor, cursorAccent: p.background, selectionBackground: p.selectionBackground + "66" };
+      el.style.background = p.background;
+    });
     const fit = new FitAddon();
     term.loadAddon(fit);
     const resize = () => { if (!term.element) return; fit.fit(); invoke("pty_resize", { issueId, cols: term.cols, rows: term.rows }).catch(() => {}); };

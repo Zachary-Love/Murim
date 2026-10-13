@@ -107,10 +107,59 @@ pub fn load(app: &AppHandle) {
     sessions(app).0.lock().unwrap().map = map;
 }
 
+/// App exit: hang everything up, give agents up to 1.5s to exit cleanly, then kill what's left.
 pub fn kill_all(app: &AppHandle) {
-    for p in sessions(app).0.lock().unwrap().ptys.values_mut() {
+    let mut g = sessions(app).0.lock().unwrap();
+    g.ptys.values().for_each(|p| sighup(p.child.as_ref()));
+    for _ in 0..15 {
+        if g.ptys.values_mut().all(|p| matches!(p.child.try_wait(), Ok(Some(_)))) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    for p in g.ptys.values_mut() {
         let _ = p.child.kill();
     }
+}
+
+// Graceful stops. portable-pty's kill() escalates SIGHUP -> SIGKILL after 250ms, but Claude needs ~700ms to exit
+// cleanly; killed sooner (within ~10s of launch) it leaves its fullscreen boot-canary record behind, and its next launch
+// in ANY terminal falls back to the classic renderer (two strikes disable fullscreen for that version).
+fn sighup(c: &(dyn portable_pty::Child + Send + Sync)) {
+    if let Some(pid) = c.process_id() {
+        let _ = std::process::Command::new("/bin/kill").args(["-HUP", &pid.to_string()]).status();
+    }
+}
+
+/// Stop a PTY still in the map (its reader thread marks the session ended); SIGKILL after 3s if it ignores SIGHUP.
+fn hangup(app: &AppHandle, id: &str) {
+    let gen = {
+        let g = sessions(app).0.lock().unwrap();
+        let Some(p) = g.ptys.get(id) else { return };
+        sighup(p.child.as_ref());
+        p.gen
+    };
+    let (app, id) = (app.clone(), id.to_string());
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(3));
+        if let Some(p) = sessions(&app).0.lock().unwrap().ptys.get_mut(&id).filter(|p| p.gen == gen) {
+            let _ = p.child.kill();
+        }
+    });
+}
+
+/// Stop a PTY already taken out of the map.
+fn hangup_owned(mut p: Pty) {
+    std::thread::spawn(move || {
+        sighup(p.child.as_ref());
+        for _ in 0..30 {
+            if matches!(p.child.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let _ = p.child.kill();
+    });
 }
 
 // ---- hooks -> status ----
@@ -231,8 +280,8 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
         let (a, t) = (app.clone(), task.to_string());
         std::thread::spawn(move || {
             // take the PTY out first so its reader thread doesn't mark the new session ended
-            if let Some(mut p) = update(&a, |g| g.ptys.remove(&t)) {
-                let _ = p.child.kill();
+            if let Some(p) = update(&a, |g| g.ptys.remove(&t)) {
+                hangup_owned(p);
             }
             let r = crate::inbox::set_issue_repo(a.clone(), a.state(), t.clone(), repo.to_string_lossy().into()).and_then(|_| start_task(a.clone(), t.clone(), mode));
             if let Err(e) = r {
@@ -587,12 +636,10 @@ pub fn list_shells(state: State<Sessions>, issue_id: String) -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn close_shell(state: State<Sessions>, id: String) {
+pub fn close_shell(app: AppHandle, id: String) {
     // reader thread sees EOF, cleans up and emits shells-changed
     if id.contains('#') {
-        if let Some(p) = state.0.lock().unwrap().ptys.get_mut(&id) {
-            let _ = p.child.kill();
-        }
+        hangup(&app, &id);
     }
 }
 
@@ -671,9 +718,7 @@ pub fn resume_task(app: AppHandle, issue_id: String, prompt: Option<String>) -> 
 #[tauri::command]
 pub fn stop_task(app: AppHandle, issue_id: String) {
     // the reader thread sees EOF and marks the session ended
-    if let Some(p) = sessions(&app).0.lock().unwrap().ptys.get_mut(&issue_id) {
-        let _ = p.child.kill();
-    }
+    hangup(&app, &issue_id);
 }
 
 /// Review-mode agent in a PR checkout. Same PTY/hook machinery as tasks, keyed `review:<owner>/<repo>/<n>`; no PR flow, no Tempering.
@@ -723,8 +768,8 @@ fn start_agent(app: &AppHandle, id: &str, wt: &str, name: String, head: Vec<Stri
 /// Kill a session's PTY and drop it (review dismissed / PR closed).
 pub fn forget(app: &AppHandle, id: &str) {
     update(app, |g| {
-        if let Some(mut p) = g.ptys.remove(id) {
-            let _ = p.child.kill();
+        if let Some(p) = g.ptys.remove(id) {
+            hangup_owned(p);
         }
         g.map.remove(id);
         g.bufs.remove(id);
