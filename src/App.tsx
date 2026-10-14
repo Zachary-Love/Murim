@@ -151,7 +151,7 @@ export default function App() {
         ) : view === "meditations" ? (
           medSession ? <SessionPane key={openMed!.id} id={openMed!.id} session={medSession} />
           : openMed?.kind === "artifact" ? <ArtifactPane key={openMed.id} path={openMed.id} modified={med.arts.find((a) => a.path === openMed.id)?.modified} />
-          : <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Start a meditation or open an artifact.</p></div>
+          : <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Start a session or open an artifact.</p></div>
         ) : view === "reviews" ? (openPr
           ? <ReviewPane key={openPr.key} pr={openPr} session={sessions[openPr.sessionId]} />
           : <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Select a pull request to review.</p></div>
