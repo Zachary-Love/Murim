@@ -62,7 +62,7 @@ export type ReviewPr = {
   key: string; sessionId: string; owner: string; repo: string; number: number; base: string; body: string; branch: string;
   authorLogin: string; author: ReviewAuthor; requested: boolean; issue: { identifier: string; url: string } | null; bucket: Bucket; health: PrHealth;
 };
-export type ReviewFilters = { authors: string[]; statuses: Bucket[] };
+export type ReviewFilters = { authors: string[]; statuses: Bucket[]; repos: string[] /* "owner/repo" */ };
 export const BUCKET_LABEL: Record<Bucket, string> = { needsReview: "Needs review", draft: "Draft", ciFailing: "CI failing", changesRequested: "Changes requested", approved: "Approved" };
 export type Draft = { summary: string; event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; comments: { path: string; line: number; body: string }[] };
 

@@ -4,8 +4,12 @@ export const authorKey = (a: ReviewAuthor) => (a.kind === "linear" ? a.id : "unl
 export const authorLabel = (a: ReviewAuthor) => (a.kind === "linear" ? a.name : `@${a.login}`);
 
 // Linear semantics: empty dimension = no filter; OR within a dimension, AND across.
+export const repoKey = (p: ReviewPr) => `${p.owner}/${p.repo}`;
 export const applyFilters = (prs: ReviewPr[], f: ReviewFilters) =>
-  prs.filter((p) => (!f.authors.length || f.authors.includes(authorKey(p.author))) && (!f.statuses.length || f.statuses.includes(p.bucket)));
+  prs.filter((p) => (!f.authors.length || f.authors.includes(authorKey(p.author))) && (!f.statuses.length || f.statuses.includes(p.bucket))
+    && (!f.repos?.length || f.repos.includes(repoKey(p))));
+
+export const reposOf = (prs: ReviewPr[]) => [...new Set(prs.map(repoKey))].sort();
 
 export const authorsOf = (prs: ReviewPr[]) => {
   const m = new Map<string, { key: string; label: string; avatarUrl: string | null }>();

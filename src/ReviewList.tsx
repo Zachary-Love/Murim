@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ReviewPr, ReviewFilters, Bucket, BUCKET_LABEL, SEV, OVERALL } from "./types";
-import { applyFilters, authorsOf, authorKey, authorLabel } from "./reviewFilter";
+import { applyFilters, authorsOf, authorKey, authorLabel, reposOf, repoKey } from "./reviewFilter";
 import { PrIcon } from "./Icons";
 
 // 16px round avatar: Linear picture, else initials (dashed ring for unlinked GitHub authors)
@@ -9,14 +9,15 @@ export const Avatar = ({ url, label, unlinked }: { url?: string | null; label: s
   url ? <img className="avatar" src={url} alt="" /> : <span className={`avatar ${unlinked ? "unlinked" : ""}`}>{label.replace("@", "").slice(0, 1).toUpperCase()}</span>;
 
 const BUCKETS = Object.keys(BUCKET_LABEL) as Bucket[];
-type Dim = "authors" | "statuses";
+type Dim = "authors" | "statuses" | "repos";
+const NONE: ReviewFilters = { authors: [], statuses: [], repos: [] };
 
 export default function ReviewList({ prs, error, open, onOpen }: { prs: ReviewPr[]; error: string | null; open: string | null; onOpen: (key: string) => void }) {
-  const [f, setF] = useState<ReviewFilters>({ authors: [], statuses: [] });
+  const [f, setF] = useState<ReviewFilters>(NONE);
   const [pop, setPop] = useState<Dim | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    invoke<{ review_filters?: ReviewFilters }>("get_settings").then((s) => s.review_filters && setF({ authors: s.review_filters.authors ?? [], statuses: s.review_filters.statuses ?? [] })).catch(() => {});
+    invoke<{ review_filters?: ReviewFilters }>("get_settings").then((s) => s.review_filters && setF({ ...NONE, ...s.review_filters })).catch(() => {});
   }, []);
   useEffect(() => {
     if (!pop) return;
@@ -27,10 +28,12 @@ export default function ReviewList({ prs, error, open, onOpen }: { prs: ReviewPr
   const save = (v: ReviewFilters) => { setF(v); invoke("set_review_filters", { filters: v }).catch(() => {}); };
   const toggle = (d: Dim, k: string) => save({ ...f, [d]: f[d].includes(k as never) ? f[d].filter((x) => x !== k) : [...f[d], k] });
   const authors = authorsOf(prs);
+  // remembered repos stay selectable even when they have no open PRs right now
+  const repos = [...new Set([...reposOf(prs), ...f.repos])].sort();
   const shown = applyFilters(prs, f);
   // a remembered author may not be in the current list: label it by key rather than hide it
   const aName = (k: string) => authors.find((a) => a.key === k)?.label ?? (k === "unlinked" ? "Unlinked" : "Unknown");
-  const active = f.authors.length + f.statuses.length > 0;
+  const active = f.authors.length + f.statuses.length + f.repos.length > 0;
   return (
     <>
       <div className="filter-bar" ref={ref}>
@@ -59,21 +62,34 @@ export default function ReviewList({ prs, error, open, onOpen }: { prs: ReviewPr
             </div>
           )}
         </span>
-        {active && <button className="link-btn clear" onClick={() => save({ authors: [], statuses: [] })}>Clear</button>}
+        <span className="anchor">
+          <button className={`btn ${pop === "repos" ? "on" : ""}`} onClick={() => setPop(pop === "repos" ? null : "repos")}>Repo{f.repos.length > 0 && <span className="count">{f.repos.length}</span>}</button>
+          {pop === "repos" && (
+            <div className="popover">
+              {!repos.length && <span className="empty">No repos</span>}
+              {repos.map((r) => (
+                <button key={r} className={f.repos.includes(r) ? "on" : ""} onClick={() => toggle("repos", r)}>
+                  <span className="check">{f.repos.includes(r) && "✓"}</span>{r}
+                </button>
+              ))}
+            </div>
+          )}
+        </span>
+        {active && <button className="link-btn clear" onClick={() => save(NONE)}>Clear</button>}
       </div>
       {active && (
         <div className="filter-chips">
           {f.authors.length > 0 && <span className="chip">Author: {f.authors.map(aName).join(", ")}<button title="Clear author filter" onClick={() => save({ ...f, authors: [] })}>×</button></span>}
           {f.statuses.length > 0 && <span className="chip">Status: {f.statuses.map((b) => BUCKET_LABEL[b]).join(", ")}<button title="Clear status filter" onClick={() => save({ ...f, statuses: [] })}>×</button></span>}
+          {f.repos.length > 0 && <span className="chip">Repo: {f.repos.map((r) => r.split("/")[1]).join(", ")}<button title="Clear repo filter" onClick={() => save({ ...f, repos: [] })}>×</button></span>}
         </div>
       )}
       {error && <div className="banner">{error}</div>}
       <ul className="tasks">
         {shown.map((p) => (
           <li key={p.key}>
-            <button className={`row ${open === p.key ? "on" : ""}`} title={`${p.health.title} · ${authorLabel(p.author)}`} onClick={() => onOpen(p.key)}>
+            <button className={`row ${open === p.key ? "on" : ""}`} title={`${p.health.title} · ${repoKey(p)}#${p.number} · ${authorLabel(p.author)}`} onClick={() => onOpen(p.key)}>
               <Avatar url={p.author.kind === "linear" ? p.author.avatarUrl : null} label={authorLabel(p.author)} unlinked={authorKey(p.author) === "unlinked"} />
-              <span className="ident">{p.repo}#{p.number}</span>
               <span className="t">{p.health.title}</span>
               {p.requested && <i className="ico dot-req" title="Your review is requested" />}
               <PrIcon color={SEV[p.health.overall] ?? "grey"} title={OVERALL[p.health.overall] ?? p.health.overall} />
