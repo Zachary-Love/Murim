@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import Settings, { SettingsNav, Section } from "./Settings";
+import { applyAppearance, withDefaults } from "./appearance";
 import Caffeine from "./Caffeine";
 import Updater from "./Updater";
 import { Item, Repo, Session, Mode, AgentKind, LogEntry, PrMap, SEV, OVERALL, ReviewPr, MedSel, Automation, AutoSel, isAuto, sortItems, stage } from "./types";
@@ -58,6 +59,14 @@ export default function App() {
     const ua = listen<Automation[]>("automations-updated", (e) => setAutos(e.payload));
     const onBadge = (e: Event) => setBadge((e as CustomEvent).detail);
     window.addEventListener("murim-badge", onBadge);
+    // appearance: apply the saved one; System mode follows macOS light/dark live
+    let look = withDefaults(null);
+    invoke<{ appearance: unknown }>("get_settings").then((s) => { look = withDefaults(s.appearance); applyAppearance(look); }).catch(() => {});
+    const onLook = (e: Event) => { look = (e as CustomEvent).detail; };
+    window.addEventListener("murim-appearance", onLook);
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    const onScheme = () => { if (look.mode === "system") applyAppearance(look); };
+    mq.addEventListener("change", onScheme);
     // menu bar item clicked: jump to that task / automation run
     const nav = listen<{ view: View; id: string }>("navigate", ({ payload: p }) => {
       switchView(p.view);
@@ -65,7 +74,7 @@ export default function App() {
     });
     const ul = listen<LogEntry>("tempering-log", (e) =>
       setLogs((l) => ({ ...l, [e.payload.issueId]: [e.payload, ...(l[e.payload.issueId] ?? [])].slice(0, 20) })));
-    return () => { nav.then((f) => f()); window.removeEventListener("murim-badge", onBadge); ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); ur.then((f) => f()); ua.then((f) => f()); };
+    return () => { mq.removeEventListener("change", onScheme); window.removeEventListener("murim-appearance", onLook); nav.then((f) => f()); window.removeEventListener("murim-badge", onBadge); ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); ur.then((f) => f()); ua.then((f) => f()); };
   }, []);
 
   // re-read when Settings closes so a new default mode / agent applies without a restart

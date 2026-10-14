@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import AppearanceSettings from "./AppearanceSettings";
 import { MODE_LABEL, AgentKind, ReplyMode } from "./types";
 
 type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off" };
@@ -115,6 +116,7 @@ export default function Settings({ tab }: { tab: Section }) {
         <textarea value={s.default_prompt} placeholder="Appended to every task prompt, e.g. run the tests before finishing" onChange={(e) => setS({ ...s, default_prompt: e.target.value })} />
       </label>
       )}
+      {tab === "Appearance" && <AppearanceSettings />}
       {tab === "Appearance" && (
       <label>Review requests badge
         <select value={s.review_badge} onChange={(e) => {

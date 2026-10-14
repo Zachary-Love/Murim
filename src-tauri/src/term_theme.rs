@@ -11,6 +11,10 @@ pub struct Theme {
     #[serde(rename = "selectionBackground")]
     pub selection: String,
     pub ansi: Vec<String>,
+    /// iTerm "Normal Font", e.g. "Monaco 12" -> ("Monaco", 12); the name is a PostScript name WebKit resolves locally
+    pub font: Option<String>,
+    #[serde(rename = "fontSize")]
+    pub font_size: Option<f64>,
 }
 
 fn hex(v: &Value) -> Option<String> {
@@ -34,6 +38,8 @@ pub fn parse(bookmarks: &Value, default_guid: &str, dark: bool) -> Option<Theme>
         cursor: col("Cursor Color")?,
         selection: col("Selection Color")?,
         ansi: (0..16).map(|i| col(&format!("Ansi {i} Color"))).collect::<Option<_>>()?,
+        font: b["Normal Font"].as_str().and_then(|f| f.rsplit_once(' ')).map(|(n, _)| n.to_string()),
+        font_size: b["Normal Font"].as_str().and_then(|f| f.rsplit_once(' ')).and_then(|(_, s)| s.parse().ok()),
     })
 }
 
@@ -66,9 +72,11 @@ mod tests {
         for i in 0..16 {
             p[format!("Ansi {i} Color")] = c(0.0, 1.0, 0.0);
         }
+        p["Normal Font"] = json!("JetBrainsMono-Regular 13");
         let list = json!([{"Guid": "G1"}, p]);
         let d = parse(&list, "G2", true).unwrap();
         assert_eq!((d.background.as_str(), d.foreground.as_str(), d.ansi.len()), ("#000000", "#808080", 16));
+        assert_eq!((d.font.as_deref(), d.font_size), (Some("JetBrainsMono-Regular"), Some(13.0)));
         assert_eq!(parse(&list, "G2", false).unwrap().background, "#ffffff");
         assert_eq!(parse(&list, "G1", true), None); // incomplete profile: keep the built-in theme
     }

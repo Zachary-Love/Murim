@@ -44,6 +44,8 @@ pub struct Settings {
     pub review_badge: ReviewBadge,
     /// Meditation artifacts folder; empty = ~/.murim/meditations.
     pub meditations_dir: String,
+    /// Theme, accent, texture and fonts. Schema and defaults live in the frontend (src/appearance.ts); null = defaults.
+    pub appearance: serde_json::Value,
 }
 
 pub fn meditations_dir(s: &Settings) -> PathBuf {
@@ -103,12 +105,23 @@ pub fn get_settings(app: AppHandle) -> Result<Settings, String> {
 pub fn save_settings(app: AppHandle, mut settings: Settings) -> Result<(), String> {
     let d = dir(&app)?;
     // caffeine is owned by the sidebar toggle; don't let a stale form overwrite it.
-    settings.caffeine = load(&d).caffeine;
-    settings.review_filters = load(&d).review_filters; // owned by the Reviews filter bar
+    let cur = load(&d);
+    settings.caffeine = cur.caffeine;
+    settings.review_filters = cur.review_filters; // owned by the Reviews filter bar
+    settings.appearance = cur.appearance; // owned by set_appearance (saves on change)
     save(&d, &settings)
 }
 
 /// Applies immediately (no Save click), like the filters.
+/// Applies immediately (no Save click).
+#[tauri::command]
+pub fn set_appearance(app: AppHandle, appearance: serde_json::Value) -> Result<(), String> {
+    let d = dir(&app)?;
+    let mut s = load(&d);
+    s.appearance = appearance;
+    save(&d, &s)
+}
+
 #[tauri::command]
 pub fn set_review_badge(app: AppHandle, badge: ReviewBadge) -> Result<(), String> {
     let d = dir(&app)?;
@@ -144,7 +157,7 @@ mod tests {
         let d = std::env::temp_dir().join(format!("murim-settings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         assert_eq!(load(&d), Settings::default()); // missing
-        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into(), review_filters: ReviewFilters { authors: vec!["u1".into(), "unlinked".into()], statuses: vec!["draft".into()] }, review_badge: ReviewBadge::Dot, meditations_dir: "/m".into() };
+        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into(), review_filters: ReviewFilters { authors: vec!["u1".into(), "unlinked".into()], statuses: vec!["draft".into()] }, review_badge: ReviewBadge::Dot, meditations_dir: "/m".into(), appearance: serde_json::json!({"mode": "custom", "base": "#efe6d8"}) };
         save(&d, &s).unwrap();
         assert_eq!(load(&d), s);
         std::fs::write(d.join("settings.json"), "{not json").unwrap();
