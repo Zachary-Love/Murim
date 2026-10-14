@@ -1,29 +1,28 @@
-# Murim
+<p align="center">
+  <img src="src-tauri/icons/128x128@2x.png" width="128" alt="Murim logo">
+</p>
+<h1 align="center">Murim</h1>
 
+<p align="center">
 One pane of glass for AI feature development. Murim pulls your Linear issues and their GitHub PRs into one
 list, puts Claude Code to work on a task with one button, and babysits the PR to merge.
+</p>
 
-- **Tasks** — your assigned issues in the active Linear cycle, each matched to a local repo.
-- **Start agent** — creates a git worktree on the issue's branch and runs your coding agent in it, with extra
-  terminal tabs if you want them. With Claude Code it works in the background and you're notified only when it has a question.
-- **Draft PR review** — after a quality pass, Claude opens a draft PR with its own title and description.
-  You review the diff in Murim, then accept (marks it ready for review) or send changes back to Claude.
-- **Tempering** — watches CI, review comments and merge conflicts, and invokes Claude only when there's work.
-- **Reviews** — other people's open PRs: those requesting your review plus your Linear teams' in-progress issues with a
-  linked PR. Filter by author and status like in Linear; the author is the assignee of the linked Linear issue (or
-  of the issue named in the branch, e.g. `eng-123-fix`), else the PR shows under "Unlinked". Filters are remembered.
-  **Review with agent** checks the PR out in `~/.murim/reviews/<repo>/<n>` (the repo must be cloned under your repos
-  folder) and has your agent draft a review into `.murim/review.json`. You edit the summary, verdict and line comments in
-  Murim; nothing is posted to GitHub until you click Post. The checkout is removed on Dismiss or when the PR closes.
-- **Meditations** — free-form agent sessions in your repos folder for questions and plans not tied to an issue
-  ("how does X work?", "plan Y across my stack"). Sessions get a random name you can rename. The agent saves anything
-  worth keeping as markdown in the Meditations folder (Settings, default `~/.murim/meditations`); Murim lists and
-  searches those artifacts and renders them. Meditations use your Settings permission mode, on your real checkouts.
-- **Automations** — scheduled agent runs: a prompt, a folder and a schedule (daily, weekdays, weekly, every 2 weeks
-  from a start date, or monthly). Each run is its own session you can open. When a run waits on you (e.g. Claude asks
-  before sending an email) you get a "<name> needs you" notification and a dot on the rail. Murim must be open and
-  the Mac awake; a run missed within 24h runs once on launch/wake, older ones show as missed.
-- **Caffeine** — keeps the Mac awake while flows run.
+## Features
+
+| Feature | What it does |
+|---|---|
+| **Tasks** | Your assigned issues in the active Linear cycle, each matched to a local repo. |
+| **Start agent** | Creates a git worktree on the issue's branch and runs your coding agent in it, with extra terminal tabs if you want them. With Claude Code it works in the background and you're notified only when it has a question. |
+| **Draft PR review** | After a quality pass, Claude opens a draft PR with its own title and description. You review the diff in Murim, then accept (marks it ready for review) or send changes back to Claude. |
+| **Tempering** | Watches CI, review comments and merge conflicts, and invokes Claude only when there's work. |
+| **Reviews** | Other people's open PRs: those requesting your review plus your Linear teams' in-progress issues with a linked PR. Filter by author, status and repo like in Linear; the author is the assignee of the linked Linear issue (or of the issue named in the branch, e.g. `eng-123-fix`), else "Unlinked". Filters are remembered. **Review with agent** checks the PR out in `~/.murim/reviews/<repo>/<n>` and has your agent draft a review; you edit the summary, verdict and line comments, and nothing is posted to GitHub until you click Post. |
+| **Meditations** | Free-form agent sessions in your repos folder for questions and plans not tied to an issue ("how does X work?", "plan Y across my stack"). The agent saves anything worth keeping as markdown artifacts (default `~/.murim/meditations`), which Murim lists, searches and renders. |
+| **Automations** | Scheduled agent runs: a prompt, a folder and a schedule (daily, weekdays, weekly, every 2 weeks from a start date, or monthly). When a run waits on you (e.g. Claude asks before sending an email) you get a "&lt;name&gt; needs you" notification and a dot on the rail. Runs need Murim open and the Mac awake; a run missed within 24h runs once on launch or wake. |
+| **Menu bar** | A menu bar icon lists what needs you: drafts to review, Tempering escalations and automation runs waiting on you. Click one to jump to it. |
+| **Appearance** | System, Light, Dark or a Custom theme (pick a base colour, e.g. beige, plus contrast), accent colour, optional texture (grain, paper, dots, lines), and separate interface and terminal fonts. The terminal can follow your iTerm profile or the Murim theme. |
+| **Updates** | Murim checks for new releases and updates itself in place (signed updates). |
+| **Caffeine** | Keeps the Mac awake while flows run. |
 
 macOS only for now. Version 0.2.0 is early software.
 
@@ -51,7 +50,7 @@ pnpm tauri dev          # development
 pnpm tauri build        # release .app / .dmg
 ```
 
-Open Settings (gear, bottom left), set the repos folder, paste your Linear key, save.
+Open Settings (gear, bottom left): set the repos folder under **Folders** and paste your Linear key under **Accounts**, then save.
 Issues are matched to repos by a label equal to the repo name (or a label you mapped before). Otherwise, with Claude
 Code, **Start agent** opens Claude in the repos folder with the issue, the repo list and Murim's best guess; it only
 reads, names the repo with a final `MURIM_REPO: <name>` line, and Murim moves the task into that repo's worktree.
@@ -59,7 +58,7 @@ The folder button in the task bar picks the repo by hand at any time. Custom age
 
 ## Agents
 
-Settings → Agent picks what **Start agent** runs:
+Settings → **AI** picks what **Start agent** runs:
 
 - **Claude Code** (default) — full automation: status and question relay via Claude Code hooks, the quality pass and
   draft PR, and Tempering.
@@ -72,7 +71,7 @@ Settings → Agent picks what **Start agent** runs:
 Claude runs as the unmodified interactive CLI in a hidden terminal, with Claude Code hooks reporting its
 status to a local server (`127.0.0.1`, random port, per-launch token). Murim's own logic is deterministic:
 it polls Linear and GitHub and applies fixed rules, invoking Claude only when there is something to do.
-See [plan.md](plan.md) for the design.
+Design notes for each feature live in [docs/specs](docs/specs).
 
 ## Security notes
 
@@ -96,8 +95,9 @@ Bump the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.
 push a tag: `git tag v0.2.0 && git push origin v0.2.0`. GitHub Actions builds the Apple Silicon `.dmg` and publishes
 the release.
 
-Releases are signed for the in-app updater, so the repo needs the `TAURI_SIGNING_PRIVATE_KEY` and
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` Actions secrets. The private key lives at `~/.tauri/murim.key` (public key in
+Releases are signed for the in-app updater with the `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secrets, stored in the repo's `release` environment: only `v*` tags can use it and
+each release run waits for the owner's approval in the Actions tab. The private key lives at `~/.tauri/murim.key` (public key in
 `tauri.conf.json`). Back it up: if it's lost, existing installs can never update again. 0.1.0 shipped without the
 updater, so 0.1.0 users have to install the next release manually once.
 
