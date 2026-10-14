@@ -1,6 +1,6 @@
 // node scripts/appearance.check.ts — lightness / text choice / contrast bounds / defaults
 import assert from "node:assert/strict";
-import { isLight, k, tokens, withDefaults, baseOf, DEFAULTS } from "../src/appearance.ts";
+import { isLight, k, kText, tokens, withDefaults, baseOf, DEFAULTS } from "../src/appearance.ts";
 
 assert.equal(isLight("#efe6d8"), true, "beige is light -> dark text");
 assert.equal(isLight("#1e293b"), false, "navy is dark -> light text");
@@ -10,6 +10,7 @@ assert.equal(isLight("#808080"), false, "mid grey (L~0.6) counts as dark");
 assert.equal(k(50), 1);
 assert.equal(k(-10), 0.75);
 assert.equal(k(500), 1.25);
+assert.ok(100 - 56 / kText(0) > 35, "dim text stays legible at contrast 0");
 const beige = tokens({ ...DEFAULTS, mode: "custom", base: "#efe6d8" }, true);
 assert.equal(beige["--fg"], "#141414");
 assert.equal(beige["color-scheme"], "light");

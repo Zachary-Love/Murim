@@ -45,6 +45,7 @@ input, textarea {
   height: 28px; padding: 0 10px; font-size: 12px; background: var(--bg);
   border: 1px solid var(--line-hi); border-radius: 7px; min-width: 0;
 }
+input[type=range] { height: 18px; padding: 0; margin: 0; border: 0; border-radius: 0; background: none; box-shadow: none; } /* not a text box: full-width thumb travel */
 textarea { height: auto; min-height: 72px; padding: 8px 10px; resize: vertical; width: 100%; }
 input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
 .link-btn { background: none; border: 0; padding: 0; color: var(--text); cursor: pointer; text-align: left; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -150,7 +151,7 @@ button.chip:hover { background: var(--hover); border-color: var(--line-hi); colo
 .settings input.size { width: 64px; }
 .settings input.hex { width: 96px; }
 .settings input[type=color] { width: 34px; height: 28px; padding: 2px; border: 1px solid var(--line-hi); border-radius: 7px; background: var(--surface); cursor: pointer; }
-.settings input[type=range] { accent-color: var(--brand); }
+.settings input[type=range] { accent-color: var(--brand); width: 100%; }
 .swatch { width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent; box-shadow: 0 0 0 1px var(--line-hi); cursor: pointer; padding: 0; }
 .swatch.on { border-color: var(--bg); box-shadow: 0 0 0 2px var(--text); }
 .preview { flex: none; display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--tex), var(--bg); }

@@ -55,6 +55,8 @@ export const baseOf = (a: Appearance, systemDark: boolean) =>
 
 /** contrast 0..100 -> k 0.75..1.25 (50 = the original dark look). Surfaces spread with k, text levels tighten. */
 export const k = (contrast: number) => 0.75 + Math.min(100, Math.max(0, contrast)) * 0.005;
+/** Text levels move less (0.9..1.1) so muted text and icons stay legible at contrast 0. */
+export const kText = (contrast: number) => 0.9 + Math.min(100, Math.max(0, contrast)) * 0.002;
 
 function texture(t: Texture, intensity: number, light: boolean): string {
   if (t === "none") return "none";
@@ -70,7 +72,7 @@ function texture(t: Texture, intensity: number, light: boolean): string {
 
 /** All CSS variables for an appearance. */
 export function tokens(a: Appearance, systemDark: boolean): Record<string, string> {
-  const base = baseOf(a, systemDark), light = isLight(base), K = k(a.contrast);
+  const base = baseOf(a, systemDark), light = isLight(base), K = k(a.contrast), T = kText(a.contrast);
   const fg = light ? "#141414" : "#fafafa";
   const mix = (pct: number) => `color-mix(in srgb, ${fg} ${Math.min(100, pct).toFixed(1)}%, ${base})`;
   const status = light
@@ -79,7 +81,7 @@ export function tokens(a: Appearance, systemDark: boolean): Record<string, strin
   return {
     "--base": base, "--fg": fg, "--bg": base,
     "--surface": mix(3.3 * K), "--raised": mix(5.4 * K), "--hover": mix(8.7 * K), "--line": mix(11.7 * K), "--line-hi": mix(19 * K),
-    "--text": fg, "--text-2": mix(100 - 16 / K), "--muted": mix(100 - 36 / K), "--dim": mix(100 - 56 / K),
+    "--text": fg, "--text-2": mix(100 - 16 / T), "--muted": mix(100 - 36 / T), "--dim": mix(100 - 56 / T),
     "--accent": a.accent, "--brand": a.accent, "--brand-dim": `color-mix(in srgb, ${a.accent} 12%, transparent)`,
     "--on-accent": isLight(a.accent) ? "#141414" : "#ffffff",
     "--red": status.red, "--amber": status.amber, "--blue": status.blue, "--green": status.green,
