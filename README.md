@@ -25,7 +25,7 @@ list, puts Claude Code to work on a task with one button, and babysits the PR to
   the Mac awake; a run missed within 24h runs once on launch/wake, older ones show as missed.
 - **Caffeine** — keeps the Mac awake while flows run.
 
-macOS only for now. Version 0.1.0 is early software.
+macOS only for now. Version 0.2.0 is early software.
 
 ## Install
 
