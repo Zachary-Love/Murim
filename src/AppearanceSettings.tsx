@@ -50,8 +50,8 @@ export default function AppearanceSettings() {
       <div className="preview">
         <div className="preview-side">
           <div className="section-label">My tasks</div>
-          <div className="row on"><span className="ident">FOR-7</span><span className="t">Write the docs</span></div>
-          <div className="row"><span className="ident">FOR-3</span><span className="t">Fix flaky CI</span></div>
+          <div className="row on"><span className="ident">MER-7</span><span className="t">Write the docs</span></div>
+          <div className="row"><span className="ident">MER-3</span><span className="t">Fix flaky CI</span></div>
         </div>
         <div className="preview-main">
           <div className="group gap"><button type="button" className="btn primary">Start agent</button><button type="button" className="btn">Resume</button><span className="chip green">CI passing</span></div>
