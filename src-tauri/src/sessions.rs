@@ -83,6 +83,7 @@ fn update<R>(app: &AppHandle, f: impl FnOnce(&mut Inner) -> R) -> R {
         (r, g.map.clone())
     };
     crate::tray::refresh(app, &map); // outside the lock: it reads the inbox
+    crate::pavilion::poke(app); // sessions changed: re-evaluate the board
     r
 }
 
@@ -177,9 +178,14 @@ pub fn is_automation(id: &str) -> bool {
     id.starts_with("automation:")
 }
 
+/// Pavilion's read-only planning session keyed `investigation:<issueId>`.
+pub fn is_investigation(id: &str) -> bool {
+    id.starts_with("investigation:")
+}
+
 /// Status + notifications only: no repo pick, markers, PR flow or Tempering; hooks via --settings.
 fn agent_only(id: &str) -> bool {
-    is_meditation(id) || is_automation(id)
+    is_meditation(id) || is_automation(id) || is_investigation(id)
 }
 
 pub fn title_of(s: &SessionInfo) -> String {
@@ -248,6 +254,9 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
                 }
             }
         }
+        if stop && is_investigation(task) && crate::pavilion::investigation_outcome(ev["last_assistant_message"].as_str().unwrap_or_default(), Path::new(&root)).is_none() {
+            st = Status::NeedsInput; // stopped without a plan: it's asking the user something
+        }
         s.status = st;
         if st != Status::NeedsInput {
             s.questions = None;
@@ -264,6 +273,10 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
     }
     if let Some(t) = ready {
         notify(app, t, "Draft PR ready for your review".into());
+    }
+    if stop && is_investigation(task) {
+        let (a, t, m) = (app.clone(), task.to_string(), ev["last_assistant_message"].as_str().unwrap_or_default().to_string());
+        std::thread::spawn(move || crate::pavilion::investigation_done(&a, &t, &m));
     }
     if let Some((wt, title)) = quality {
         let ident = crate::inbox::find(app, task).map(|i| i.issue.identifier).unwrap_or(title); // worktree dir is the identifier
@@ -506,6 +519,9 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
             // hooks via --settings: nothing written into repos_root
             let sys = format!("Save documents worth keeping (plans, explanations, notes) as markdown files in {d}, with a descriptive kebab-case filename and a # title.");
             c.args(["--settings", &merge_hooks(json!({})).to_string(), "--add-dir", d, "--append-system-prompt", &sys]);
+        } else if is_investigation(issue_id) {
+            // read-only like the repo-pick session; also on resume
+            c.args(["--settings", &merge_hooks(json!({})).to_string(), "--disallowedTools", "Edit,Write,NotebookEdit"]);
         } else if is_automation(issue_id) {
             c.args(["--settings", &merge_hooks(json!({})).to_string()]); // also on resume
         } else if wt.is_empty() {
@@ -692,6 +708,10 @@ pub fn start_task(app: AppHandle, issue_id: String, permission_mode: PermissionM
         return Err("Set the agent command in Settings".into());
     }
     let issue = format!("Linear issue {}: {}\n{}\n\n{}", i.identifier, i.title, i.url, i.description);
+    let issue = match crate::pavilion::approved_plan(&app, &issue_id) {
+        Some(p) => format!("{issue}\n\nImplementation plan (approved by the user):\n{p}"),
+        None => issue,
+    };
     // semantic/claude matches are guesses: Claude confirms the repo from repos_root first (custom agents have no hooks to report it)
     let guess = it.repo.as_ref().filter(|r| matches!(r.source, Source::Semantic | Source::Claude));
     let (wt, prompt) = match &it.repo {
@@ -775,6 +795,11 @@ pub fn start_automation_session(app: &AppHandle, id: &str, name: String, folder:
     let extra = cfg.default_prompt.trim();
     let extra = if extra.is_empty() { String::new() } else { format!("\n\nInstructions:\n{extra}") };
     start_agent(app, id, &dir, name, vec![format!("{prompt}{extra}")])
+}
+
+/// Pavilion investigation in repos_root keyed `investigation:<issueId>`; the prompt asks for a plan + MURIM_REPO line.
+pub fn start_investigation_session(app: &AppHandle, id: &str, name: String, repos_root: &str, prompt: String) -> Result<(), String> {
+    start_agent(app, id, repos_root, name, vec![prompt])
 }
 
 pub fn pty_alive(app: &AppHandle, id: &str) -> bool {

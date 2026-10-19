@@ -295,6 +295,7 @@ fn poll(app: &AppHandle) {
 pub fn start(app: AppHandle) {
     std::thread::spawn(move || loop {
         poll(&app);
+        crate::pavilion::poke(&app);
         let (m, cv) = &app.state::<Reviews>().wake;
         drop(cv.wait_timeout_while(m.lock().unwrap(), Duration::from_secs(120), |woken| !*woken).unwrap().0);
         *m.lock().unwrap() = false;
@@ -371,6 +372,11 @@ fn home() -> Result<PathBuf, String> {
 
 fn wt_of(p: &ReviewPr) -> Result<PathBuf, String> {
     Ok(home()?.join(".murim/reviews").join(&p.repo).join(p.number.to_string()))
+}
+
+/// The review agent wrote its draft (Pavilion: "review draft ready").
+pub fn has_draft(p: &ReviewPr) -> bool {
+    wt_of(p).is_ok_and(|w| w.join(".murim/review.json").exists())
 }
 
 fn clone_of(app: &AppHandle, p: &ReviewPr) -> Result<PathBuf, String> {
