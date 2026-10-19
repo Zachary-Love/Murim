@@ -46,6 +46,8 @@ pub struct Settings {
     pub meditations_dir: String,
     /// Theme, accent, texture and fonts. Schema and defaults live in the frontend (src/appearance.ts); null = defaults.
     pub appearance: serde_json::Value,
+    /// Pavilion board: local model, agent slots, auto-investigate, Claude check.
+    pub pavilion: PavilionSettings,
 }
 
 pub fn meditations_dir(s: &Settings) -> PathBuf {
@@ -74,6 +76,33 @@ pub struct ReviewFilters {
     pub statuses: Vec<String>,
     /// "owner/repo"
     pub repos: Vec<String>,
+}
+
+/// When Claude checks the local model's verdict.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum CheckMode {
+    #[default]
+    Always,
+    LowConfidence,
+    Off,
+}
+
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(default)]
+pub struct PavilionSettings {
+    pub ollama_url: String,
+    pub model: String,
+    /// Live agent sessions Pavilion fills up to when starting investigations.
+    pub max_agents: u32,
+    pub auto_investigate: bool,
+    pub claude_check: CheckMode,
+}
+
+impl Default for PavilionSettings {
+    fn default() -> Self {
+        Self { ollama_url: "http://localhost:11434".into(), model: "qwen3:4b".into(), max_agents: 3, auto_investigate: true, claude_check: CheckMode::Always }
+    }
 }
 
 /// Missing or corrupt file yields defaults.
@@ -159,7 +188,7 @@ mod tests {
         let d = std::env::temp_dir().join(format!("murim-settings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         assert_eq!(load(&d), Settings::default()); // missing
-        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into(), review_filters: ReviewFilters { authors: vec!["u1".into(), "unlinked".into()], statuses: vec!["draft".into()], repos: vec!["o/api".into()] }, review_badge: ReviewBadge::Dot, meditations_dir: "/m".into(), appearance: serde_json::json!({"mode": "custom", "base": "#efe6d8"}) };
+        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into(), review_filters: ReviewFilters { authors: vec!["u1".into(), "unlinked".into()], statuses: vec!["draft".into()], repos: vec!["o/api".into()] }, review_badge: ReviewBadge::Dot, meditations_dir: "/m".into(), appearance: serde_json::json!({"mode": "custom", "base": "#efe6d8"}), pavilion: PavilionSettings { max_agents: 5, ..Default::default() } };
         save(&d, &s).unwrap();
         assert_eq!(load(&d), s);
         std::fs::write(d.join("settings.json"), "{not json").unwrap();
@@ -167,5 +196,13 @@ mod tests {
         assert_eq!(meditations_dir(&s), PathBuf::from("/m"));
         assert!(meditations_dir(&Settings::default()).ends_with(".murim/meditations"));
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn pavilion_defaults_and_partial() {
+        let p = PavilionSettings::default();
+        assert_eq!((p.ollama_url.as_str(), p.model.as_str(), p.max_agents, p.auto_investigate, p.claude_check), ("http://localhost:11434", "qwen3:4b", 3, true, CheckMode::Always));
+        let s: Settings = serde_json::from_str(r#"{"pavilion": {"max_agents": 2, "claude_check": "lowConfidence"}}"#).unwrap();
+        assert_eq!((s.pavilion.max_agents, s.pavilion.claude_check, s.pavilion.model.as_str()), (2, CheckMode::LowConfidence, "qwen3:4b"));
     }
 }
