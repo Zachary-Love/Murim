@@ -1,4 +1,4 @@
-//! macOS menu bar icon: what needs you — drafts to review, Tempering escalations, automation runs waiting.
+//! macOS menu bar icon: what needs you — drafts to review, Tempering escalations, automation runs waiting, plans to approve.
 use crate::hooks::{PrFlow, Status};
 use crate::sessions::{self, SessionInfo};
 use serde_json::json;
@@ -12,14 +12,14 @@ use tauri::{AppHandle, Emitter, Manager};
 const ID: &str = "murim";
 const PLAIN: &[u8] = include_bytes!("../icons/tray/plain.png");
 const DOT: &[u8] = include_bytes!("../icons/tray/dot.png");
-const SECTIONS: [&str; 3] = ["Drafts to review", "Tempering needs you", "Automations waiting"];
+const SECTIONS: [&str; 4] = ["Drafts to review", "Tempering needs you", "Automations waiting", "Plans to approve"];
 
-/// (section, menu id, label); menu id is `task|<issueId>` or `run|<sessionId>`.
+/// (section, menu id, label); menu id is `task|<issueId>`, `run|<sessionId>` or `pavilion|<issueId>`.
 type Entry = (usize, String, String);
 static LAST: Mutex<Option<Vec<Entry>>> = Mutex::new(None);
 
 /// Pure: who needs the user, sorted by section then label. `task` gives a task's menu label.
-pub fn needs(map: &HashMap<String, SessionInfo>, task: impl Fn(&SessionInfo) -> String) -> Vec<Entry> {
+pub fn needs(map: &HashMap<String, SessionInfo>, plans: &[(String, String)], task: impl Fn(&SessionInfo) -> String) -> Vec<Entry> {
     let mut v = vec![];
     for (id, s) in map {
         if sessions::is_automation(id) {
@@ -35,6 +35,7 @@ pub fn needs(map: &HashMap<String, SessionInfo>, task: impl Fn(&SessionInfo) -> 
             }
         }
     }
+    v.extend(plans.iter().map(|(id, label)| (3, format!("pavilion|{id}"), label.clone())));
     v.sort();
     v
 }
@@ -61,7 +62,8 @@ pub fn refresh(app: &AppHandle, map: &HashMap<String, SessionInfo>) {
         Some(it) => short(&format!("{}  {}", it.issue.identifier, it.issue.title)),
         None => short(&sessions::title_of(s)),
     };
-    let v = needs(map, task);
+    let plans: Vec<(String, String)> = crate::pavilion::plans_ready(app).into_iter().map(|(id, l)| (id, short(&l))).collect();
+    let v = needs(map, &plans, task);
     {
         let mut last = LAST.lock().unwrap();
         if last.as_ref() == Some(&v) {
@@ -111,6 +113,8 @@ fn click(app: &AppHandle, id: &str) {
         let _ = app.emit("navigate", json!({ "view": "tasks", "id": t }));
     } else if let Some(r) = id.strip_prefix("run|") {
         let _ = app.emit("navigate", json!({ "view": "automations", "id": r }));
+    } else if let Some(p) = id.strip_prefix("pavilion|") {
+        let _ = app.emit("navigate", json!({ "view": "pavilion", "id": p }));
     }
 }
 
@@ -136,7 +140,7 @@ mod tests {
             s("meditation:9", |x| x.status = Status::NeedsInput),
             s("review:o/r/1", |x| x.pr_flow = PrFlow::AwaitingReview),
         ].into();
-        let v = needs(&map, |s| s.issue_id.to_uppercase());
-        assert_eq!(v, vec![(0, "task|a".into(), "A".into()), (1, "task|b".into(), "B".into()), (2, "run|automation:1:2".into(), "Digest".into())]);
+        let v = needs(&map, &[("i9".into(), "MUR-9  Plan".into())], |s| s.issue_id.to_uppercase());
+        assert_eq!(v, vec![(0, "task|a".into(), "A".into()), (1, "task|b".into(), "B".into()), (2, "run|automation:1:2".into(), "Digest".into()), (3, "pavilion|i9".into(), "MUR-9  Plan".into())]);
     }
 }
