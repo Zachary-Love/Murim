@@ -94,9 +94,13 @@ export const until = (secs: number | null) => {
 
 // Pavilion: the central board (backend pavilion.rs). Card keys: issue id, review PR key, or session id.
 export type Column = "needsYou" | "working" | "blocked" | "queued" | "watching" | "done";
+export type PvStage = "triage" | "investigate" | "plan" | "implement" | "review" | "merged";
+export type Role = "investigator" | "coder" | "reviewer" | "automation" | "meditation";
+export type Verdict = { answer: string; reason: string; confidence: number; by: "local" | "claude"; fingerprint: string };
 export type Card = {
   key: string; column: Column; ident: string; title: string; repo: string; priority: number; reason: string;
   by: "local" | "claude" | null; action: "approvePlan" | "dismissBlocker" | "startNow" | null;
   view: string; target: string; pr: PrHealth | null; session: string | null; plan: string | null; updatedAt: string;
+  source: "issue" | "review" | "agent"; stage: PvStage | null; role: Role | null; summary: string; url: string; verdict: Verdict | null;
 };
 export type Board = { cards: Card[]; working: number; max: number; paused: boolean; localOffline: boolean; updated: number; error: string | null };
