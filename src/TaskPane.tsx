@@ -5,6 +5,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import Terminal from "./Terminal";
 import IssueView from "./IssueView";
 import ReviewView from "./ReviewView";
+import Escalations from "./Escalations";
 import { Item, Session, PrHealth, Repo, Mode, OVERALL, SEV, LogEntry, MODE_LABEL, AgentKind, repoName } from "./types";
 import { AgentIcon, PrIcon, FlameIcon, FolderIcon } from "./Icons";
 import logo from "./assets/logo-mark.svg";
@@ -23,9 +24,6 @@ const texts = (q: unknown): string[] => {
 export default function TaskPane({ item, session, pr, log, repos, defaultMode, agent }: { item: Item; session?: Session; pr?: PrHealth; log: LogEntry[]; repos: Repo[]; defaultMode: Mode; agent: AgentKind }) {
   const [tab, setTab] = useState<Tab>(session?.status === "needsInput" ? "agent" : (session?.prFlow === "awaitingReview" || session?.prFlow === "opened") ? "review" : "issue");
   const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [own, setOwn] = useState<string | null>(null); // escalation id with open textarea
-  const [text, setText] = useState("");
   const [term, setTerm] = useState("agent"); // "agent" or a shell id
   const [shells, setShells] = useState<string[]>([]);
   const [picking, setPicking] = useState(false);
@@ -40,11 +38,6 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode, a
     return () => { un.then((f) => f()); };
   }, [id]);
   const run = (cmd: string, args: object = {}) => invoke(cmd, { issueId: id, ...args }).then(() => setErr("")).catch((e) => setErr(String(e)));
-  const resolve = async (escalationId: string, choice: string, txt: string | null = null) => {
-    setBusy(true);
-    await run("resolve_escalation", { escalationId, choice, text: txt });
-    setBusy(false); setOwn(null); setText("");
-  };
   const ago = (at: number | string) => {
     const s = Math.max(0, Math.round((Date.now() - (typeof at === "number" ? (at < 1e12 ? at * 1000 : at) : Date.parse(at))) / 1000));
     return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : `${Math.floor(s / 3600)}h ago`;
@@ -142,26 +135,7 @@ export default function TaskPane({ item, session, pr, log, repos, defaultMode, a
               </div>
             </section>
           )}
-          {pr && session && (session.escalations ?? []).map((x) => (
-            <section key={x.id} className="card amber">
-              <div className="q-head">The agent disagrees with a review comment</div>
-              <div className="meta mono">{x.path}</div>
-              <blockquote>{x.comment}</blockquote>
-              <p>{x.reason}</p>
-              <div className="group">
-                <button className="btn primary" disabled={busy} onClick={() => resolve(x.id, "doIt")}>Do it anyway</button>
-                <button className="btn" disabled={busy} onClick={() => resolve(x.id, "postPushback")}>Post the agent's pushback</button>
-                <button className={`btn ${own === x.id ? "on" : ""}`} disabled={busy} onClick={() => setOwn(own === x.id ? null : x.id)}>Write my own reply</button>
-                <button className="btn ghost" disabled={busy} onClick={() => resolve(x.id, "ignore")}>Ignore</button>
-              </div>
-              {own === x.id && (
-                <div className="reply">
-                  <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Your reply…" />
-                  <button className="btn primary" disabled={busy || !text.trim()} onClick={() => resolve(x.id, "ownReply", text)}>Send reply</button>
-                </div>
-              )}
-            </section>
-          ))}
+          {pr && session && <Escalations issueId={id} list={session.escalations ?? []} />}
           {pr && session && log.length > 0 && (
             <section className="card">
               <div className="q-head"><FlameIcon /> Tempering activity</div>

@@ -29,6 +29,12 @@ pub struct SessionInfo {
     pub permission_mode: PermissionMode,
     #[serde(default)]
     pub tempering: bool,
+    /// the user switched Tempering off here: Pavilion's auto-enable leaves it alone
+    #[serde(default)]
+    pub tempering_off: bool,
+    /// what the current Tempering turn is fixing, for Pavilion's card ("fixing 2 review comments")
+    #[serde(default)]
+    pub tempering_note: String,
     #[serde(default)]
     pub escalations: Vec<Escalation>,
     #[serde(default)]
@@ -737,7 +743,7 @@ pub fn start_task(app: AppHandle, issue_id: String, permission_mode: PermissionM
             return Err("already running".to_string());
         }
         let old = g.map.get(&issue_id).cloned();
-        g.map.insert(issue_id.clone(), SessionInfo { issue_id: issue_id.clone(), worktree: wt, session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode, tempering: !custom && old.as_ref().is_some_and(|o| o.tempering), escalations: vec![], pr_flow: old.as_ref().map(|o| o.pr_flow).unwrap_or_default(), agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), name: String::new(), tempering_turn: false, memory: old.map(|o| o.memory).unwrap_or_default() });
+        g.map.insert(issue_id.clone(), SessionInfo { issue_id: issue_id.clone(), worktree: wt, session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode, tempering: !custom && old.as_ref().is_some_and(|o| o.tempering), tempering_off: old.as_ref().is_some_and(|o| o.tempering_off), tempering_note: String::new(), escalations: vec![], pr_flow: old.as_ref().map(|o| o.pr_flow).unwrap_or_default(), agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), name: String::new(), tempering_turn: false, memory: old.map(|o| o.memory).unwrap_or_default() });
         Ok(())
     })?;
     spawn(&app, &issue_id, vec![prompt])
@@ -817,7 +823,7 @@ fn start_agent(app: &AppHandle, id: &str, wt: &str, name: String, head: Vec<Stri
         if g.ptys.contains_key(id) {
             return Err("already running".to_string());
         }
-        g.map.insert(id.into(), SessionInfo { issue_id: id.into(), worktree: wt.into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode: if is_investigation(id) { PermissionMode::Normal } else { cfg.default_permission_mode }, tempering: false, escalations: vec![], memory: Default::default(), pr_flow: PrFlow::None, agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), name, tempering_turn: false });
+        g.map.insert(id.into(), SessionInfo { issue_id: id.into(), worktree: wt.into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode: if is_investigation(id) { PermissionMode::Normal } else { cfg.default_permission_mode }, tempering: false, tempering_off: false, tempering_note: String::new(), escalations: vec![], memory: Default::default(), pr_flow: PrFlow::None, agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), name, tempering_turn: false });
         Ok(())
     })?;
     spawn(app, id, head)

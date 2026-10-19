@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
+use crate::judge::{self, Q};
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Emitter};
 
@@ -30,6 +32,9 @@ pub struct Escalation {
     pub path: String,
     pub comment: String,
     pub reason: String,
+    /// Pavilion's triage: only the user can answer this one (vs. the agent disagreeing)
+    #[serde(default)]
+    pub ask: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -38,13 +43,15 @@ pub enum Kind {
     Ci,
     Thread,
     Conflict,
+    /// a "changes requested" review's summary (no inline thread)
+    Review,
 }
 
 /// Persisted per issue in sessions.json.
 #[derive(Serialize, Deserialize, Clone, Default, PartialEq, Debug)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Memory {
-    /// `ci:<sha>:<check>`, `thread:<id>:<last comment id>`, `conflict:<sha>`
+    /// `ci:<sha>:<check>`, `thread:<id>:<last comment id>`, `conflict:<sha>`, `review:<id>`
     pub handled: HashSet<String>,
     pub attempts: HashMap<Kind, u32>,
     /// `<sha>:<check>` already re-run once
@@ -75,6 +82,14 @@ pub struct FailCheck {
     pub run_id: Option<u64>,
 }
 
+/// A "changes requested" review by someone else, with a summary body.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Review {
+    pub id: String,
+    pub author: String,
+    pub body: String,
+}
+
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct PrDetail {
     pub sha: String,
@@ -82,6 +97,22 @@ pub struct PrDetail {
     pub checks: Vec<FailCheck>,
     /// unresolved, non-outdated
     pub threads: Vec<Thread>,
+    pub reviews: Vec<Review>,
+}
+
+/// New review feedback for Pavilion to triage before the agent sees it: (memory key, thread id or "", where, text).
+pub fn feedback(d: &PrDetail, m: &Memory) -> Vec<(String, String, String, String)> {
+    let threads = d.threads.iter().map(|t| {
+        let at = format!("{}{}", t.path, t.line.map(|l| format!(":{l}")).unwrap_or_default());
+        let text = t.comments.iter().map(|c| format!("{}: {}", c.author, c.body)).collect::<Vec<_>>().join("\n");
+        (thread_key(t), t.id.clone(), at, text)
+    });
+    let reviews = d.reviews.iter().map(|r| (review_key(r), String::new(), "review".to_string(), format!("{}: {}", r.author, r.body)));
+    threads.chain(reviews).filter(|(k, ..)| !m.handled.contains(k)).collect()
+}
+
+pub fn review_key(r: &Review) -> String {
+    format!("review:{}", r.id)
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -120,7 +151,12 @@ pub fn parse_detail(j: &Value, h: &PrHealth) -> Option<PrDetail> {
             comments: nodes(&t["comments"]).iter().map(|c| Comment { id: c["databaseId"].as_u64().unwrap_or(0), author: s(&c["author"]["login"]), body: s(&c["body"]) }).collect(),
         })
         .collect();
-    Some(PrDetail { sha: s(&n["headRefOid"]), base: s(&n["baseRefName"]), checks, threads })
+    let reviews = nodes(&n["latestReviews"])
+        .iter()
+        .filter(|r| r["state"] == "CHANGES_REQUESTED" && r["author"]["login"] != *me && !s(&r["body"]).trim().is_empty())
+        .map(|r| Review { id: s(&r["id"]), author: s(&r["author"]["login"]), body: s(&r["body"]) })
+        .collect();
+    Some(PrDetail { sha: s(&n["headRefOid"]), base: s(&n["baseRefName"]), checks, threads, reviews })
 }
 
 pub fn thread_key(t: &Thread) -> String {
@@ -174,10 +210,16 @@ pub fn decide(d: &PrDetail, h: &PrHealth, m: &mut Memory) -> Vec<Action> {
     let ci_names: Vec<_> = d.checks.iter().filter(|c| ci_keys.contains(&format!("ci:{}:{}", d.sha, c.name))).map(|c| c.name.as_str()).collect();
     let ci_prompt = format!("CI is failing on the PR: {}. Fix it and push to the PR branch.", ci_names.join(", "));
     let new_threads: Vec<&Thread> = if m.escalated.contains(&Kind::Thread) { vec![] } else { d.threads.iter().filter(|t| !m.handled.contains(&thread_key(t))).collect() };
+    let new_reviews: Vec<&Review> = if m.escalated.contains(&Kind::Review) { vec![] } else { d.reviews.iter().filter(|r| !m.handled.contains(&review_key(r))).collect() };
+    let review_prompt = format!(
+        "A reviewer requested changes on the PR:\n{}\n\nMake the changes and push to the PR branch. (Review summaries have no thread: no reply line needed.)",
+        new_reviews.iter().map(|r| format!("- {}: {}", r.author, r.body.replace('\n', " "))).collect::<Vec<_>>().join("\n")
+    );
     let conflict = h.conflict && !m.escalated.contains(&Kind::Conflict) && !m.handled.contains(&format!("conflict:{}", d.sha));
     let triggers = [
         (Kind::Ci, ci_keys, ci_prompt, ci_logs),
         (Kind::Thread, new_threads.iter().map(|t| thread_key(t)).collect(), thread_prompt(&new_threads), vec![]),
+        (Kind::Review, new_reviews.iter().map(|r| review_key(r)).collect(), review_prompt, vec![]),
         (Kind::Conflict, if conflict { vec![format!("conflict:{}", d.sha)] } else { vec![] }, format!("The PR has merge conflicts. Rebase onto {}, resolve the conflicts, and push.", d.base), vec![]),
     ];
     for (kind, keys, prompt, logs) in triggers {
@@ -300,7 +342,7 @@ pub fn consume(app: &AppHandle, id: &str) {
             Line::Disagree { thread_id, reason } => {
                 let t = details().lock().unwrap().get(id).and_then(|d| d.threads.iter().find(|t| t.id == thread_id).cloned());
                 let (path, comment) = t.map(|t| (t.path, t.comments.last().map(|c| c.body.clone()).unwrap_or_default())).unwrap_or_default();
-                let e = Escalation { id: format!("{thread_id}-{}", rand::random::<u32>()), thread_id, path: path.clone(), comment, reason };
+                let e = Escalation { id: format!("{thread_id}-{}", rand::random::<u32>()), thread_id, path: path.clone(), comment, reason, ask: false };
                 let title = sessions::with_session(app, id, |s| {
                     s.escalations.push(e);
                     s.status = Status::NeedsInput;
@@ -322,6 +364,14 @@ pub fn run(app: &AppHandle, id: &str, d: &PrDetail, h: &PrHealth) {
     let Some((on, wt, status, mut mem, title)) = sessions::with_session(app, id, |s| (s.tempering, s.worktree.clone(), s.status, s.memory.clone(), sessions::title_of(s))) else { return };
     if !on || !matches!(status, Status::Idle | Status::Ended) {
         return;
+    }
+    if triage(app, id, d, &mut mem) {
+        if let Some(t) = sessions::with_session(app, id, |s| {
+            s.status = Status::NeedsInput;
+            sessions::title_of(s)
+        }) {
+            sessions::notify(app, t, "A review comment needs your call".into());
+        }
     }
     let (mut invokes, mut prompts, mut logs) = (vec![], vec![], vec![]);
     for a in decide(d, h, &mut mem) {
@@ -356,7 +406,11 @@ pub fn run(app: &AppHandle, id: &str, d: &PrDetail, h: &PrHealth) {
             prompts.push(format!("Failed log tail for {name} (last {LOG_LINES} lines):\n{t}"));
         }
         let _ = std::fs::create_dir_all(Path::new(&wt).join(".murim"));
-        sessions::with_session(app, id, |s| s.tempering_turn = true);
+        let note = note(&invokes);
+        sessions::with_session(app, id, |s| {
+            s.tempering_turn = true;
+            s.tempering_note = note;
+        });
         if let Err(e) = sessions::resume_task(app.clone(), id.into(), Some(prompts.join("\n\n"))) {
             sessions::with_session(app, id, |s| s.tempering_turn = false);
             for (kind, keys) in invokes {
@@ -371,6 +425,77 @@ pub fn run(app: &AppHandle, id: &str, d: &PrDetail, h: &PrHealth) {
     sessions::with_session(app, id, |s| s.memory = mem);
 }
 
+/// Pavilion's card while a Tempering turn runs.
+fn note(invokes: &[(Kind, Vec<String>)]) -> String {
+    let n = |k: Kind| invokes.iter().filter(|(x, _)| *x == k).map(|(_, keys)| keys.len()).sum::<usize>();
+    let mut parts = vec![];
+    if n(Kind::Ci) > 0 {
+        parts.push("fixing CI".to_string());
+    }
+    match n(Kind::Thread) {
+        0 => {}
+        1 => parts.push("fixing 1 review comment".into()),
+        c => parts.push(format!("fixing {c} review comments")),
+    }
+    if n(Kind::Review) > 0 {
+        parts.push("addressing requested changes".into());
+    }
+    if n(Kind::Conflict) > 0 {
+        parts.push("resolving merge conflicts".into());
+    }
+    parts.join(", ")
+}
+
+/// Pavilion: the local model sorts new review feedback before the agent sees it. "skip" is dropped (logged), "ask"
+/// becomes an escalation for the user, "act" (or no answer at all) is left for `decide` as before. Returns whether it asked.
+/// ponytail: runs on the PR poll thread, one judgement per new comment (each only once); a slow model delays that poll.
+fn triage(app: &AppHandle, id: &str, d: &PrDetail, mem: &mut Memory) -> bool {
+    let items = feedback(d, mem);
+    if items.is_empty() {
+        return false;
+    }
+    let cfg = crate::settings::dir(app).map(|d| crate::settings::load(&d).pavilion).unwrap_or_default();
+    let allowed = judge::allowed(Q::Feedback, &[], "");
+    let mut asked = false;
+    for (key, thread_id, at, text) in items {
+        let o = judge::ask(&cfg, Q::Feedback, &judge::prompt(Q::Feedback, &format!("{at}\n{text}"), &[], ""), &allowed, &key, |p| sessions::claude_print(p, Duration::from_secs(90)));
+        let Some(v) = o.verdict else { continue };
+        match v.answer.as_str() {
+            "skip" => {
+                mem.handled.insert(key);
+                log(app, id, format!("Skipped feedback on {at}: {}", v.reason));
+            }
+            "ask" => {
+                mem.handled.insert(key.clone());
+                let e = Escalation { id: format!("{key}-{}", rand::random::<u32>()), thread_id, path: at.clone(), comment: text, reason: v.reason, ask: true };
+                sessions::with_session(app, id, |s| s.escalations.push(e));
+                log(app, id, format!("Feedback on {at} needs your call"));
+                asked = true;
+            }
+            _ => {}
+        }
+    }
+    asked
+}
+
+/// Pavilion's "Handle PR feedback automatically": Tempering on for a Claude session once its PR is open,
+/// unless the user switched it off for that session.
+pub fn auto_enable(app: &AppHandle, id: &str, h: &PrHealth) {
+    if h.state != PrState::Open || !crate::settings::dir(app).is_ok_and(|d| crate::settings::load(&d).pavilion.auto_temper) {
+        return;
+    }
+    let flip = |s: &mut sessions::SessionInfo| {
+        let on = !s.tempering && !s.tempering_off && s.agent != crate::settings::AgentKind::Custom && !s.worktree.is_empty();
+        s.tempering |= on;
+        on.then(|| s.worktree.clone())
+    };
+    if let Some(wt) = sessions::with_session(app, id, flip).flatten() {
+        let _ = std::fs::create_dir_all(Path::new(&wt).join(".murim"));
+        let _ = sessions::exclude_settings(Path::new(&wt));
+        log(app, id, "Tempering on: Pavilion handles PR feedback");
+    }
+}
+
 // ---- commands ----
 
 #[tauri::command]
@@ -380,6 +505,7 @@ pub fn set_tempering(app: AppHandle, issue_id: String, on: bool) -> Result<(), S
     }
     let wt = sessions::with_session(&app, &issue_id, |s| {
         s.tempering = on;
+        s.tempering_off = !on;
         s.worktree.clone()
     })
     .ok_or("unknown session")?;
@@ -404,7 +530,9 @@ pub async fn resolve_escalation(app: AppHandle, issue_id: String, escalation_id:
     let e = sessions::with_session(&app, &issue_id, |s| s.escalations.iter().find(|e| e.id == escalation_id).cloned()).flatten().ok_or("unknown escalation")?;
     match choice {
         Choice::DoIt => {
-            let p = format!("Make the change requested in thread {}: {} even though you disagreed\n\n(threadId {})\n{}", e.path, e.comment, e.thread_id, reply_protocol());
+            let p = if e.ask {
+                format!("The PR owner wants this review feedback addressed ({}):\n{}\n\nMake the change and push.{}", e.path, e.comment, if e.thread_id.is_empty() { String::new() } else { format!(" (threadId {})\n{}", e.thread_id, reply_protocol()) })
+            } else { format!("Make the change requested in thread {}: {} even though you disagreed\n\n(threadId {})\n{}", e.path, e.comment, e.thread_id, reply_protocol()) };
             sessions::with_session(&app, &issue_id, |s| s.tempering_turn = true);
             sessions::resume_task(app.clone(), issue_id.clone(), Some(p)).inspect_err(|_| {
                 sessions::with_session(&app, &issue_id, |s| s.tempering_turn = false);
@@ -440,7 +568,7 @@ mod tests {
         h
     }
     fn failing(sha: &str) -> PrDetail {
-        PrDetail { sha: sha.into(), base: "main".into(), checks: vec![FailCheck { name: "build".into(), run_id: Some(9) }], threads: vec![] }
+        PrDetail { sha: sha.into(), base: "main".into(), checks: vec![FailCheck { name: "build".into(), run_id: Some(9) }], threads: vec![], reviews: vec![] }
     }
     fn red() -> PrHealth {
         health(|h| (h.ci, h.failing_checks) = (Ci::Failing, vec!["build".into()]))
@@ -553,13 +681,39 @@ mod tests {
                 {"id": "T2", "isResolved": true, "isOutdated": false, "comments": {"nodes": []}},
                 {"id": "T3", "isResolved": false, "isOutdated": true, "comments": {"nodes": []}},
                 {"id": "T4", "isResolved": false, "isOutdated": false, "comments": {"nodes": [
-                    {"databaseId": 8, "author": {"login": "bob"}, "body": "rename"}, {"databaseId": 9, "author": {"login": "me"}, "body": "Looking into it"}]}}]}}]}}}});
+                    {"databaseId": 8, "author": {"login": "bob"}, "body": "rename"}, {"databaseId": 9, "author": {"login": "me"}, "body": "Looking into it"}]}}]},
+            "latestReviews": {"nodes": [
+                {"id": "R1", "state": "CHANGES_REQUESTED", "body": "Split this function", "author": {"login": "bob"}},
+                {"id": "R2", "state": "CHANGES_REQUESTED", "body": "", "author": {"login": "amy"}},
+                {"id": "R3", "state": "APPROVED", "body": "lgtm", "author": {"login": "cat"}},
+                {"id": "R4", "state": "CHANGES_REQUESTED", "body": "self", "author": {"login": "me"}}]}}]}}}});
         let h = health(|h| h.failing_checks = vec!["build".into(), "legacy".into()]);
         let d = parse_detail(&j, &h).unwrap();
         assert_eq!((d.sha.as_str(), d.base.as_str()), ("abc", "main"));
         assert_eq!(d.checks, vec![FailCheck { name: "build".into(), run_id: Some(99) }, FailCheck { name: "legacy".into(), run_id: None }]);
         assert_eq!(d.threads.len(), 1);
         assert_eq!((thread_key(&d.threads[0]).as_str(), d.threads[0].comments[0].author.as_str()), ("thread:T1:7", "bob"));
+        // only others' change requests with something to read
+        assert_eq!(d.reviews, vec![Review { id: "R1".into(), author: "bob".into(), body: "Split this function".into() }]);
+    }
+
+    #[test]
+    fn review_summary_is_a_trigger_and_feedback_lists_new_items() {
+        let mut d = PrDetail { sha: "s".into(), base: "main".into(), ..Default::default() };
+        d.reviews = vec![Review { id: "R1".into(), author: "bob".into(), body: "Split this function".into() }];
+        d.threads = vec![thread("T1", 10)];
+        let h = health(|h| h.changes_requested = true);
+        let mut m = Memory::default();
+        let f = feedback(&d, &m);
+        assert_eq!(f.iter().map(|x| (x.0.as_str(), x.1.as_str(), x.2.as_str())).collect::<Vec<_>>(), [("thread:T1:10", "T1", "a.rs:3"), ("review:R1", "", "review")]);
+        m.handled.insert("thread:T1:10".into()); // triage skipped or asked about it
+        assert_eq!(feedback(&d, &m).len(), 1);
+        match &decide(&d, &h, &mut m)[..] {
+            [Action::Invoke { kind: Kind::Review, keys, prompt, .. }] => assert!(keys == &["review:R1"] && prompt.contains("Split this function")),
+            x => panic!("{x:?}"),
+        }
+        assert!(decide(&d, &h, &mut m).is_empty() && feedback(&d, &m).is_empty()); // handled once
+        assert_eq!(note(&[(Kind::Thread, vec!["a".into(), "b".into()]), (Kind::Review, vec!["r".into()])]), "fixing 2 review comments, addressing requested changes");
     }
 
     #[test]

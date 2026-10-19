@@ -13,6 +13,8 @@ pub enum Q {
     Ready,
     /// waits on another board issue that Linear doesn't record?
     Blocker,
+    /// PR review feedback: a change for the agent, a call for the user, or nothing to do?
+    Feedback,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
@@ -38,6 +40,7 @@ pub fn allowed(q: Q, board: &[String], me: &str) -> Vec<String> {
     match q {
         Q::Ready => vec!["ready".into(), "needsUser".into()],
         Q::Blocker => board.iter().filter(|b| *b != me).cloned().chain(["none".to_string()]).collect(),
+        Q::Feedback => vec!["act".into(), "ask".into(), "skip".into()],
     }
 }
 
@@ -49,6 +52,7 @@ pub fn prompt(q: Q, issue: &str, board: &[(String, String)], me: &str) -> String
             let others: Vec<String> = board.iter().filter(|(id, _)| id != me).map(|(id, t)| format!("{id}: {t}")).collect();
             format!("Does this issue say it must wait until one of the other issues below is finished? Only name an issue if the text says so; otherwise answer \"none\". Allowed answers: the identifier of one issue below, or \"none\".\n{rules}\n\nOther issues:\n{}\n\nIssue:\n{issue}", others.join("\n"))
         }
+        Q::Feedback => format!("You triage code review feedback on a pull request for the coding agent that wrote it. \"act\": it asks for a concrete change the agent can make in the code. \"ask\": it is a question, a product or design decision, or too unclear for the agent, so the person who owns the PR must answer. \"skip\": praise, thanks, a nit explicitly marked optional, or an automated notice with nothing to change. Allowed answers: \"act\", \"ask\", \"skip\".\n{rules}\n\nFeedback:\n{issue}"),
     }
 }
 
@@ -148,6 +152,9 @@ mod tests {
     fn allowed_and_prompt_exclude_self() {
         assert_eq!(allowed(Q::Ready, &ids(&["MUR-1"]), "MUR-1"), ids(&["ready", "needsUser"]));
         assert_eq!(allowed(Q::Blocker, &ids(&["MUR-1", "MUR-2"]), "MUR-1"), ids(&["MUR-2", "none"]));
+        assert_eq!(allowed(Q::Feedback, &[], ""), ids(&["act", "ask", "skip"]));
+        assert!(prompt(Q::Feedback, "a.rs:3\nbob: rename x", &[], "").contains("bob: rename x"));
+        assert_eq!(parse(r#"{"answer": "maybe"}"#, &allowed(Q::Feedback, &[], "")), None); // no "none" fallback: unanswered → the agent gets it
         let p = prompt(Q::Blocker, "MUR-1 t", &[("MUR-1".into(), "self".into()), ("MUR-2".into(), "API migration".into())], "MUR-1");
         assert!(p.contains("MUR-2: API migration") && !p.contains("MUR-1: self"));
     }

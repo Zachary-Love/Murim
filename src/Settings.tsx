@@ -4,7 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import AppearanceSettings from "./AppearanceSettings";
 import { MODE_LABEL, AgentKind, ReplyMode } from "./types";
 
-type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_investigate: boolean; claude_check: "always" | "lowConfidence" | "off" } };
+type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_temper: boolean; auto_investigate: boolean; claude_check: "always" | "lowConfidence" | "off" } };
 
 export const SECTIONS = ["Appearance", "Prompts", "Folders", "AI", "Pavilion", "Accounts"] as const;
 export type Section = typeof SECTIONS[number];
@@ -152,6 +152,13 @@ export default function Settings({ tab }: { tab: Section }) {
           <option value="off">Off</option>
         </select>
       </label>
+      <label>Handle PR feedback automatically
+        <select value={pv.auto_temper ? "on" : "off"} onChange={(e) => set({ auto_temper: e.target.value === "on" })}>
+          <option value="on">On</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <p className="muted">Turns Tempering on for every PR an agent opens: failing checks, merge conflicts and review feedback go back to the agent. The local model sorts each review comment first: changes go to the agent, questions and decisions come to you, praise and optional nits are skipped. Switching Tempering off on a task keeps it off.</p>
       <label>Claude check
         <select value={pv.claude_check} onChange={(e) => set({ claude_check: e.target.value as S["pavilion"]["claude_check"] })}>
           <option value="always">Always</option>

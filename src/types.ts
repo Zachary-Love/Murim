@@ -14,7 +14,7 @@ export type Artifact = { path: string; title: string; modified: number };
 export type MedSel = { kind: "session" | "artifact"; id: string };
 export const isMed = (id: string) => id.startsWith("meditation:");
 export type ReplyMode = "off" | "terse" | "full";
-export type Escalation = { id: string; threadId: string; path: string; comment: string; reason: string };
+export type Escalation = { id: string; threadId: string; path: string; comment: string; reason: string; ask?: boolean };
 export type LogEntry = { issueId: string; at: number | string; message: string };
 export type Repo = { name: string; path: string };
 export type PrHealth = {

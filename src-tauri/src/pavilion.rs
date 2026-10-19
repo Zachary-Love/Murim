@@ -218,11 +218,12 @@ pub fn decide(v: &IssueView) -> Decision {
         return d(Column::Done, "merged");
     }
     if let Some(s) = v.session {
+        // escalations first: they set needsInput too, and say why
+        if let Some(e) = s.escalations.first() {
+            return d(Column::NeedsYou, if e.ask { format!("review needs your call: {}", e.reason) } else { format!("Tempering: {}", e.reason) });
+        }
         if s.status == Status::NeedsInput {
             return d(Column::NeedsYou, asks(s));
-        }
-        if let Some(e) = s.escalations.first() {
-            return d(Column::NeedsYou, format!("Tempering: {}", e.reason));
         }
         if matches!(s.pr_flow, PrFlow::AwaitingReview | PrFlow::Opened) {
             return d(Column::NeedsYou, "draft PR ready for review");
@@ -240,6 +241,10 @@ pub fn decide(v: &IssueView) -> Decision {
         _ => {}
     }
     if live(v.session) {
+        let s = v.session.unwrap();
+        if s.tempering_turn && !s.tempering_note.is_empty() {
+            return d(Column::Working, s.tempering_note.clone());
+        }
         let ci = v.pr.filter(|p| p.overall == Overall::CiFailing).map(|p| format!("fixing CI: {}", p.failing_checks.join(", ")));
         return d(Column::Working, ci.unwrap_or_else(|| "agent working".into()));
     }
@@ -583,6 +588,7 @@ fn spawn_judge(app: &AppHandle, issue: Issue, ask: Vec<Q>, board: Vec<(String, S
                 match q {
                     Q::Ready => r.ready = Some(v),
                     Q::Blocker => r.blocker = Some(v),
+                    Q::Feedback => {} // asked by tempering::triage, never from here
                 }
             }
             save(&g.store);
@@ -738,6 +744,12 @@ mod tests {
         let mut s = sess("1", "idle");
         s.escalations = vec![serde_json::from_value(json!({"id": "e", "threadId": "t", "path": "", "comment": "", "reason": "unclear ask"})).unwrap()];
         assert_eq!(col(&run(&i, Some(&s), None, None, &r)), (Column::NeedsYou, "Tempering: unclear ask"));
+        let mut s = sess("1", "needsInput");
+        s.escalations = vec![serde_json::from_value(json!({"id": "e", "threadId": "", "path": "review", "comment": "", "reason": "API naming is a product call", "ask": true})).unwrap()];
+        assert_eq!(col(&run(&i, Some(&s), None, None, &r)), (Column::NeedsYou, "review needs your call: API naming is a product call"));
+        let mut s = sess("1", "working");
+        (s.tempering_turn, s.tempering_note) = (true, "fixing 2 review comments".into());
+        assert_eq!(col(&run(&i, Some(&s), None, Some(&pr(Overall::CiFailing, PrState::Open)), &r)), (Column::Working, "fixing 2 review comments"));
         let mut s = sess("1", "idle");
         s.pr_flow = PrFlow::AwaitingReview;
         assert_eq!(col(&run(&i, Some(&s), None, None, &r)).0, Column::NeedsYou);

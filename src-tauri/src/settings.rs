@@ -97,13 +97,15 @@ pub struct PavilionSettings {
     pub max_agents: u32,
     /// Docker builds/runs agents may have going at once (docker.rs); 0 = no queue.
     pub docker_slots: u32,
+    /// Tempering on for every Claude session with an open PR (the local model triages the feedback first).
+    pub auto_temper: bool,
     pub auto_investigate: bool,
     pub claude_check: CheckMode,
 }
 
 impl Default for PavilionSettings {
     fn default() -> Self {
-        Self { ollama_url: "http://localhost:11434".into(), model: "qwen3:4b".into(), max_agents: 10, docker_slots: 2, auto_investigate: true, claude_check: CheckMode::Always }
+        Self { ollama_url: "http://localhost:11434".into(), model: "qwen3:4b".into(), max_agents: 10, docker_slots: 2, auto_temper: true, auto_investigate: true, claude_check: CheckMode::Always }
     }
 }
 
@@ -206,6 +208,7 @@ mod tests {
     fn pavilion_defaults_and_partial() {
         let p = PavilionSettings::default();
         assert_eq!((p.ollama_url.as_str(), p.model.as_str(), p.max_agents, p.docker_slots, p.auto_investigate, p.claude_check), ("http://localhost:11434", "qwen3:4b", 10, 2, true, CheckMode::Always));
+        assert!(p.auto_temper);
         let s: Settings = serde_json::from_str(r#"{"pavilion": {"max_agents": 2, "claude_check": "lowConfidence"}}"#).unwrap();
         assert_eq!((s.pavilion.max_agents, s.pavilion.claude_check, s.pavilion.model.as_str()), (2, CheckMode::LowConfidence, "qwen3:4b"));
     }

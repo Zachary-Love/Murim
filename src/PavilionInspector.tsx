@@ -6,6 +6,7 @@ import { OVERALL, SEV } from "./types";
 import { PIPELINE, ROLE_LABEL, SOURCE_LABEL, VIEW_LABEL, pill, stepOf } from "./pavilionView";
 import { SessionPane } from "./MeditationPane";
 import ReviewView from "./ReviewView";
+import Escalations from "./Escalations";
 import Markdown from "./Markdown";
 import { PrIcon } from "./Icons";
 
@@ -26,7 +27,7 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
   // the coding session's draft PR, reviewed here like Tasks → Review
   const coding = c.source === "issue" && c.session === c.key ? sessions[c.key] : undefined;
   const toReview = coding?.prFlow === "awaitingReview" || coding?.prFlow === "opened";
-  const [tab, setTab] = useState<Tab>(c.plan ? "plan" : toReview && coding?.status !== "needsInput" ? "review" : hasTerm && c.column === "needsYou" ? "terminal" : "overview");
+  const [tab, setTab] = useState<Tab>(c.plan ? "plan" : coding?.escalations?.length ? "overview" : toReview && coding?.status !== "needsInput" ? "review" : hasTerm && c.column === "needsYou" ? "terminal" : "overview");
   const tabs = TABS.filter(([k]) => k === "overview" || (k === "plan" ? !!c.plan : k === "review" ? !!coding?.worktree : k === "terminal" ? hasTerm : log.length > 0));
   const cur = tabs.some(([k]) => k === tab) ? tab : "overview";
   const view = VIEW_LABEL[c.view] ?? c.view;
@@ -78,7 +79,8 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
               </ol>
             </section>
           )}
-          {c.column === "needsYou" && (
+          {!!coding?.escalations?.length && <section className="pvi-sec"><Escalations issueId={c.key} list={coding.escalations} /></section>}
+          {c.column === "needsYou" && !coding?.escalations?.length && (
             <section className="pvi-sec">
               <div className="pvi-box amber">
                 <div className="pvi-cap">Your decision</div>
@@ -156,7 +158,7 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
       </div>
       <div className="pvi-foot">
         <button className="btn" onClick={open}>Open in {view}</button>
-        {!c.action && hasTerm && <button className={`btn ${toReview ? "" : "primary"}`} onClick={() => setTab("terminal")}>Open terminal</button>}
+        {!c.action && hasTerm && <button className={`btn ${toReview || coding?.escalations?.length ? "" : "primary"}`} onClick={() => setTab("terminal")}>Open terminal</button>}
         {primary && <button className="btn primary" disabled={busy || primary.off} onClick={primary.go}>{primary.label}</button>}
       </div>
     </aside>
