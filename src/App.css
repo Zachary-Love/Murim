@@ -329,6 +329,7 @@ button.chip:hover { background: var(--hover); border-color: var(--line-hi); colo
 .pv-col { flex: 1 1 220px; min-width: 220px; display: flex; flex-direction: column; gap: 8px; }
 .pv-col.empty { flex: 0 0 auto; min-width: 0; opacity: .6; }
 .pv-card { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--raised); cursor: pointer; }
+.pv-hit { display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
 .pv-card:hover { border-color: var(--line-hi); }
 .pv-card.on { border-color: color-mix(in srgb, var(--brand) 60%, transparent); }
 .pv-card .t { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

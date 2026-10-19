@@ -39,7 +39,7 @@ export default function Pavilion({ board, sessions, onOpen }: { board: Board; se
               return (
                 <section key={id} className={`pv-col ${cs.length ? "" : "empty"}`}>
                   <div className="section-label">{label} <span className={`count ${id === "needsYou" && cs.length ? "attn" : ""}`}>{cs.length}</span></div>
-                  {cs.map((c) => <CardView key={c.key} c={c} on={c.key === sel} onOpen={() => open(c)} run={run} />)}
+                  {cs.map((c) => <CardView key={c.key} c={c} on={c.key === sel} onOpen={() => open(c)} onEdit={() => setSel(c.key)} run={run} />)}
                 </section>
               );
             })}
@@ -47,12 +47,12 @@ export default function Pavilion({ board, sessions, onOpen }: { board: Board; se
           {done.length > 0 && (
             <div className="pv-done">
               <button className="btn ghost" onClick={() => setShowDone(!showDone)}>{showDone ? "▾" : "▸"} Done <span className="count">{done.length}</span></button>
-              {showDone && <div className="pv-cols">{done.map((c) => <CardView key={c.key} c={c} on={false} onOpen={() => open(c)} run={run} />)}</div>}
+              {showDone && <div className="pv-cols">{done.map((c) => <CardView key={c.key} c={c} on={false} onOpen={() => open(c)} onEdit={() => setSel(c.key)} run={run} />)}</div>}
             </div>
           )}
           {!board.cards.length && <div className="empty-state"><p>Nothing on the board yet. Cycle issues, review PRs and running agents show up here.</p></div>}
         </div>
-        {card?.plan ? <PlanPanel key={card.key} c={card} run={run} onClose={() => setSel(null)} />
+        {card?.plan ? <PlanPanel key={card.key + ":" + card.plan} c={card} run={run} onClose={() => setSel(null)} />
           : card?.session && sessions[card.session] ? (
             <aside className="pv-side"><SessionPane key={card.session} id={card.session} session={sessions[card.session]} title={`Investigate ${card.ident}`} noun="investigation" /></aside>
           ) : null}
@@ -61,9 +61,10 @@ export default function Pavilion({ board, sessions, onOpen }: { board: Board; se
   );
 }
 
-function CardView({ c, on, onOpen, run }: { c: Card; on: boolean; onOpen: () => void; run: Run }) {
+function CardView({ c, on, onOpen, onEdit, run }: { c: Card; on: boolean; onOpen: () => void; onEdit: () => void; run: Run }) {
   return (
-    <div className={`pv-card ${on ? "on" : ""}`} role="button" tabIndex={0} title={c.title} onClick={onOpen} onKeyDown={(e) => e.key === "Enter" && onOpen()}>
+    <div className={`pv-card ${on ? "on" : ""}`}>
+      <div className="pv-hit" role="button" tabIndex={0} title={c.title} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}>
       <div className="pv-top">
         {c.ident && <span className="ident">{c.ident}</span>}
         {c.repo && <span className="muted">{c.repo}</span>}
@@ -73,9 +74,10 @@ function CardView({ c, on, onOpen, run }: { c: Card; on: boolean; onOpen: () => 
       </div>
       <div className="t">{c.title}</div>
       <div className="pv-reason">{c.reason}</div>
+      </div>
       {c.action && (
-        <div className="group" onClick={(e) => e.stopPropagation()}>
-          {c.action === "approvePlan" && <><button className="btn primary" onClick={() => run("pavilion_approve", { issueId: c.key, plan: c.plan ?? "" })}>Approve plan</button><button className="btn" onClick={onOpen}>Edit</button></>}
+        <div className="group">
+          {c.action === "approvePlan" && <><button className="btn primary" onClick={() => run("pavilion_approve", { issueId: c.key, plan: c.plan ?? "" })}>Approve plan</button><button className="btn" onClick={onEdit}>Edit</button></>}
           {c.action === "dismissBlocker" && <button className="btn" onClick={() => run("pavilion_dismiss_blocker", { issueId: c.key })}>Dismiss</button>}
           {c.action === "startNow" && <button className="btn" onClick={() => run("pavilion_start_now", { issueId: c.key })}>Start now</button>}
         </div>
