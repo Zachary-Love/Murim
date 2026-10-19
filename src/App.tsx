@@ -5,8 +5,9 @@ import Settings, { SettingsNav, Section } from "./Settings";
 import { applyAppearance, withDefaults } from "./appearance";
 import Caffeine from "./Caffeine";
 import Updater from "./Updater";
-import { Item, Repo, Session, Mode, AgentKind, LogEntry, PrMap, SEV, OVERALL, ReviewPr, MedSel, Automation, AutoSel, isAuto, sortItems, stage } from "./types";
-import { StateIcon, AgentIcon, PrIcon, GearIcon, RefreshIcon, FlameIcon, TasksIcon, ReviewsIcon, MeditationsIcon, ClockIcon } from "./Icons";
+import { Item, Repo, Session, Mode, AgentKind, LogEntry, PrMap, SEV, OVERALL, ReviewPr, MedSel, Automation, AutoSel, Board, isAuto, sortItems, stage } from "./types";
+import { StateIcon, AgentIcon, PrIcon, GearIcon, RefreshIcon, FlameIcon, TasksIcon, ReviewsIcon, MeditationsIcon, ClockIcon, PavilionIcon } from "./Icons";
+import Pavilion from "./Pavilion";
 import TaskPane from "./TaskPane";
 import ReviewList from "./ReviewList";
 import ReviewPane from "./ReviewPane";
@@ -19,8 +20,8 @@ import logo from "./assets/logo-mark.svg";
 type Payload = { items: Item[]; error: string | null };
 type PrPayload = { prs: PrMap; error?: string | null };
 type RvPayload = { prs: ReviewPr[]; error: string | null; loaded: boolean };
-type View = "tasks" | "reviews" | "meditations" | "automations";
-const savedView = (): View => { try { const v = localStorage.getItem("murim.view"); return v === "reviews" || v === "meditations" || v === "automations" ? v : "tasks"; } catch { return "tasks"; } };
+type View = "pavilion" | "tasks" | "reviews" | "meditations" | "automations";
+const savedView = (): View => { try { const v = localStorage.getItem("murim.view"); return v === "tasks" || v === "reviews" || v === "meditations" || v === "automations" ? v : "pavilion"; } catch { return "pavilion"; } };
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false);
@@ -42,9 +43,18 @@ export default function App() {
   const [openMed, setOpenMed] = useState<MedSel | null>(null);
   const [autos, setAutos] = useState<Automation[]>([]);
   const [openAuto, setOpenAuto] = useState<AutoSel | null>(null);
+  const [board, setBoard] = useState<Board>({ cards: [], working: 0, max: 3, paused: false, localOffline: false, updated: 0, error: null });
   const [reposRoot, setReposRoot] = useState<string | null>(null);
   const med = useArtifacts(view === "meditations", sessions);
   const switchView = (v: View) => { setView(v); setShowSettings(false); try { localStorage.setItem("murim.view", v); } catch {} };
+  const go = (v: View, id: string) => {
+    switchView(v);
+    if (v === "tasks") setOpen(id);
+    else if (v === "reviews") setOpenReview(id);
+    else if (v === "meditations") setOpenMed({ kind: "session", id });
+    else if (v === "automations") setOpenAuto({ kind: "run", id });
+  };
+  const needsYou = board.cards.filter((c) => c.column === "needsYou").length;
   useEffect(() => {
     invoke<Record<string, Session>>("get_sessions").then(setSessions).catch(() => {});
     const us = listen<Record<string, Session>>("sessions-updated", (e) => setSessions(e.payload));
@@ -68,14 +78,15 @@ export default function App() {
     const mq = matchMedia("(prefers-color-scheme: dark)");
     const onScheme = () => { if (look.mode === "system") applyAppearance(look); };
     mq.addEventListener("change", onScheme);
-    // menu bar item clicked: jump to that task / automation run
+    invoke<Board>("get_pavilion").then(setBoard).catch(() => {});
+    const upv = listen<Board>("pavilion-updated", (e) => setBoard(e.payload));
+    // menu bar item clicked: jump to that task / run / plan
     const nav = listen<{ view: View; id: string }>("navigate", ({ payload: p }) => {
-      switchView(p.view);
-      if (p.view === "tasks") setOpen(p.id); else setOpenAuto({ kind: "run", id: p.id });
+      go(p.view, p.id);
     });
     const ul = listen<LogEntry>("tempering-log", (e) =>
       setLogs((l) => ({ ...l, [e.payload.issueId]: [e.payload, ...(l[e.payload.issueId] ?? [])].slice(0, 20) })));
-    return () => { mq.removeEventListener("change", onScheme); window.removeEventListener("murim-appearance", onLook); nav.then((f) => f()); window.removeEventListener("murim-badge", onBadge); ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); ur.then((f) => f()); ua.then((f) => f()); };
+    return () => { mq.removeEventListener("change", onScheme); window.removeEventListener("murim-appearance", onLook); nav.then((f) => f()); window.removeEventListener("murim-badge", onBadge); ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); ur.then((f) => f()); ua.then((f) => f()); upv.then((f) => f()); };
   }, []);
 
   // re-read when Settings closes so a new default mode / agent applies without a restart
@@ -95,6 +106,7 @@ export default function App() {
   return (
     <div className="app">
       <nav className="rail" data-tauri-drag-region>
+        <button className={`btn icon ${!showSettings && view === "pavilion" ? "on" : ""}`} title="Pavilion" onClick={() => switchView("pavilion")}><PavilionIcon />{needsYou > 0 && <span className="count attn badge">{needsYou}</span>}</button>
         <button className={`btn icon ${!showSettings && view === "tasks" ? "on" : ""}`} title="Tasks" onClick={() => switchView("tasks")}><TasksIcon /></button>
         <button className={`btn icon ${!showSettings && view === "reviews" ? "on" : ""}`} title="Reviews" onClick={() => switchView("reviews")}><ReviewsIcon />{requested > 0 && badge !== "off" && (badge === "dot" ? <span className="dot-req badge-dot" /> : <span className="count attn badge">{requested}</span>)}</button>
         <button className={`btn icon ${!showSettings && view === "meditations" ? "on" : ""}`} title="Meditations" onClick={() => switchView("meditations")}><MeditationsIcon /></button>
@@ -105,6 +117,7 @@ export default function App() {
           <button className={`btn icon ${showSettings ? "on" : ""}`} title="Settings" onClick={() => setShowSettings(!showSettings)}><GearIcon /></button>
         </div>
       </nav>
+      {(view !== "pavilion" || showSettings) && (
       <aside className="sidebar">
         <header className="brand" data-tauri-drag-region>
           <h1 data-tauri-drag-region><img className="logo" src={logo} alt="" />Murim</h1>
@@ -143,8 +156,9 @@ export default function App() {
         </ul>
         </>}
       </aside>
+      )}
       <main className="main">
-        {showSettings ? <Settings tab={settingsTab} /> : view === "automations" ? (
+        {showSettings ? <Settings tab={settingsTab} /> : view === "pavilion" ? <Pavilion board={board} sessions={sessions} onOpen={(v, id) => go(v as View, id)} /> : view === "automations" ? (
           editAuto ? <AutomationPane key={openAuto!.id} auto={editAuto} sessions={sessions} onOpen={setOpenAuto}
             onSaved={(a) => { setAutos((l) => l.some((x) => x.id === a.id) ? l.map((x) => x.id === a.id ? a : x) : [...l, a]); setOpenAuto({ kind: "automation", id: a.id }); }} />
           : openAuto?.kind === "run" ? <RunPane key={openAuto.id} id={openAuto.id} auto={runAuto} session={sessions[openAuto.id]} />

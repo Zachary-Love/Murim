@@ -93,3 +93,7 @@ export const PlusIcon = () => (
 export const RefreshIcon = () => (
   <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10.2 6.6A4.2 4.2 0 1 1 9 3" /><path d="M9.4 1v2.4H7" /></svg>
 );
+
+export const PavilionIcon = () => (
+  <svg {...L}><path d="M2 9 12 3l10 6" /><path d="M4 9h16" /><path d="M6 9v10M18 9v10M10 9v10M14 9v10" /><path d="M3 21h18" /></svg>
+);
