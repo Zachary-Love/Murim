@@ -2,6 +2,15 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use crate::reviews::{pr_url, Assignee, LinkedIssue};
 
+/// A Linear "blocks" relation pointing at this issue. Done = blocker completed, canceled or duplicate.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Blocker {
+    pub id: String,
+    pub identifier: String,
+    pub done: bool,
+}
+
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Issue {
@@ -16,11 +25,13 @@ pub struct Issue {
     pub priority: u8,
     pub labels: Vec<String>,
     pub team_key: String,
+    pub updated_at: String,
+    pub blockers: Vec<Blocker>,
 }
 
 // Linear's schema: WorkflowState.type is one of triage, backlog, unstarted, started,
 // completed, canceled, duplicate. Duplicates are the native "duplicate" state type.
-const QUERY: &str = r#"query($after: String) { viewer { assignedIssues(first: 100, after: $after, filter: { cycle: { isActive: { eq: true } }, state: { type: { nin: ["completed", "canceled", "duplicate"] } } }) { pageInfo { hasNextPage endCursor } nodes { id identifier title description url branchName priority state { name type } labels { nodes { name } } team { key } } } } }"#;
+const QUERY: &str = r#"query($after: String) { viewer { assignedIssues(first: 100, after: $after, filter: { cycle: { isActive: { eq: true } }, state: { type: { nin: ["completed", "canceled", "duplicate"] } } }) { pageInfo { hasNextPage endCursor } nodes { id identifier title description url branchName priority updatedAt state { name type } labels { nodes { name } } team { key } inverseRelations { nodes { type issue { id identifier state { type } } } } } } } }"#;
 
 fn post(api_key: &str, body: Value) -> Result<Value, String> {
     // ureq returns Err on non-2xx; Linear sends GraphQL errors (e.g. RATELIMITED) with 400, so read them.
@@ -77,6 +88,13 @@ pub async fn get_issue_detail(issue_id: String) -> Result<IssueDetail, String> {
     parse_detail(&v)
 }
 
+/// Last `n` comments, oldest first: Pavilion's judgement input. Blocking (call off the async runtime).
+pub fn recent_comments(key: &str, issue_id: &str, n: usize) -> Result<Vec<Comment>, String> {
+    let mut c = parse_detail(&post(key, json!({ "query": DETAIL, "variables": { "id": issue_id } }))?)?.comments;
+    c.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+    Ok(c.split_off(c.len().saturating_sub(n)))
+}
+
 fn parse_detail(json: &Value) -> Result<IssueDetail, String> {
     if let Some(errs) = json.get("errors").and_then(Value::as_array).filter(|e| !e.is_empty()) {
         let msg: Vec<&str> = errs.iter().filter_map(|e| e["message"].as_str()).collect();
@@ -123,6 +141,11 @@ fn parse(json: &Value) -> Result<(Vec<Issue>, Option<String>), String> {
             priority: n["priority"].as_u64().unwrap_or(0) as u8,
             labels: n["labels"]["nodes"].as_array().into_iter().flatten().map(|l| s(&l["name"])).collect(),
             team_key: s(&n["team"]["key"]),
+            updated_at: s(&n["updatedAt"]),
+            // inverseRelations of X with type "blocks": node.issue blocks X
+            blockers: n["inverseRelations"]["nodes"].as_array().into_iter().flatten().filter(|r| r["type"] == "blocks")
+                .map(|r| Blocker { id: s(&r["issue"]["id"]), identifier: s(&r["issue"]["identifier"]), done: matches!(r["issue"]["state"]["type"].as_str(), Some("completed" | "canceled" | "duplicate")) })
+                .collect(),
         })
         .collect();
     let next = conn["pageInfo"]["hasNextPage"].as_bool().unwrap_or(false).then(|| s(&conn["pageInfo"]["endCursor"]));
@@ -251,5 +274,22 @@ mod tests {
         assert!(parse_ident(&json!({"data": {"issue": null}})).unwrap().is_none());
         // Linear answers an unknown identifier with an "Entity not found" error: treat as no issue
         assert!(parse_ident(&json!({"errors": [{"message": "Entity not found: Issue"}]})).unwrap().is_none());
+    }
+
+    #[test]
+    fn parse_blockers_and_updated_at() {
+        let mut n = node("1", "started");
+        n["updatedAt"] = json!("2026-10-19T10:00:00Z");
+        n["inverseRelations"] = json!({"nodes": [
+            {"type": "blocks", "issue": {"id": "b1", "identifier": "ENG-9", "state": {"type": "started"}}},
+            {"type": "blocks", "issue": {"id": "b2", "identifier": "ENG-8", "state": {"type": "completed"}}},
+            {"type": "related", "issue": {"id": "b3", "identifier": "ENG-7", "state": {"type": "started"}}}]});
+        let j = json!({"data": {"viewer": {"assignedIssues": {"pageInfo": {"hasNextPage": false, "endCursor": null}, "nodes": [n]}}}});
+        let (v, _) = parse(&j).unwrap();
+        assert_eq!(v[0].updated_at, "2026-10-19T10:00:00Z");
+        assert_eq!(v[0].blockers, vec![Blocker { id: "b1".into(), identifier: "ENG-9".into(), done: false }, Blocker { id: "b2".into(), identifier: "ENG-8".into(), done: true }]);
+        // no relations field: no blockers
+        let j = json!({"data": {"viewer": {"assignedIssues": {"pageInfo": {}, "nodes": [node("2", "started")]}}}});
+        assert!(parse(&j).unwrap().0[0].blockers.is_empty());
     }
 }
