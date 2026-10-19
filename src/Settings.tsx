@@ -111,6 +111,10 @@ export default function Settings({ tab }: { tab: Section }) {
         </select>
       </label>
       </>}
+      <label>Max agents at once
+        <input type="number" min={1} max={50} value={s.pavilion.max_agents} onChange={(e) => setS({ ...s, pavilion: { ...s.pavilion, max_agents: Math.max(1, Number(e.target.value) || 1) } })} />
+      </label>
+      <p className="muted">How many agents Pavilion keeps working before it stops starting new investigations. Agents you start yourself aren't limited.</p>
       </>}
       {tab === "Pavilion" && (() => {
         const pv = s.pavilion, set = (p: Partial<S["pavilion"]>) => setS({ ...s, pavilion: { ...pv, ...p } });
@@ -126,9 +130,6 @@ export default function Settings({ tab }: { tab: Section }) {
       </label>
       {test && <p className="muted">{test}</p>}
       <p className="muted">Install Ollama and run <code>ollama pull {pv.model || "qwen3:4b"}</code>. Without it, Pavilion's judgement calls go to Claude.</p>
-      <label>Max agents
-        <input type="number" min={1} max={10} value={pv.max_agents} onChange={(e) => set({ max_agents: Math.max(1, Number(e.target.value) || 1) })} />
-      </label>
       <label>Investigate ready issues automatically
         <select value={pv.auto_investigate ? "on" : "off"} onChange={(e) => set({ auto_investigate: e.target.value === "on" })}>
           <option value="on">On</option>

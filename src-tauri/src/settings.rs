@@ -101,7 +101,7 @@ pub struct PavilionSettings {
 
 impl Default for PavilionSettings {
     fn default() -> Self {
-        Self { ollama_url: "http://localhost:11434".into(), model: "qwen3:4b".into(), max_agents: 3, auto_investigate: true, claude_check: CheckMode::Always }
+        Self { ollama_url: "http://localhost:11434".into(), model: "qwen3:4b".into(), max_agents: 10, auto_investigate: true, claude_check: CheckMode::Always }
     }
 }
 
@@ -201,7 +201,7 @@ mod tests {
     #[test]
     fn pavilion_defaults_and_partial() {
         let p = PavilionSettings::default();
-        assert_eq!((p.ollama_url.as_str(), p.model.as_str(), p.max_agents, p.auto_investigate, p.claude_check), ("http://localhost:11434", "qwen3:4b", 3, true, CheckMode::Always));
+        assert_eq!((p.ollama_url.as_str(), p.model.as_str(), p.max_agents, p.auto_investigate, p.claude_check), ("http://localhost:11434", "qwen3:4b", 10, true, CheckMode::Always));
         let s: Settings = serde_json::from_str(r#"{"pavilion": {"max_agents": 2, "claude_check": "lowConfidence"}}"#).unwrap();
         assert_eq!((s.pavilion.max_agents, s.pavilion.claude_check, s.pavilion.model.as_str()), (2, CheckMode::LowConfidence, "qwen3:4b"));
     }

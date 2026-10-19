@@ -103,7 +103,7 @@ next changed fingerprint or after 10 minutes, whichever comes first.
 
 ## Dispatch
 
-- **Slots:** max agents (default 3) counts every live session: coding, investigation, Tempering, review, automation
+- **Slots:** max agents (default 10) counts every live session: coding, investigation, Tempering, review, automation
   and meditation. Tempering resumes of existing sessions never wait for a slot.
 - **Queue order:** Linear priority (urgent first, no priority last), then oldest `updatedAt`.
 - **Investigation** (when Auto-investigate is on, Pavilion is not paused and the agent is Claude Code): a session
@@ -127,7 +127,7 @@ next changed fingerprint or after 10 minutes, whichever comes first.
   Count badge = number of Needs you items.
 - **Main area:** full-width board, no sidebar list. Columns in order: Needs you, Working, Blocked, Queued, Watching;
   Done collapsed at the bottom. Empty columns shrink to their header.
-- **Header:** `n/3 agents`, last update, "local model offline" when applicable, Pause toggle.
+- **Header:** `n/<max> agents`, last update, "local model offline" when applicable, Pause toggle.
 - **Card:** `StateIcon`, `PrIcon`, identifier and title, repo, priority, and a reason line saying why it is in its
   column (e.g. "asks: which auth provider?", "CI failing: lint (attempt 2/3)", "blocked by MUR-41", "inferred blocker:
   waits on API migration", "plan ready"). A small *local* / *Claude-checked* badge when a verdict decided the column.
@@ -141,7 +141,7 @@ next changed fingerprint or after 10 minutes, whichever comes first.
 
 New **Pavilion** section:
 - Ollama URL (default `http://localhost:11434`) and model (default `qwen3:4b`), **Test** button (one tiny chat call).
-- Max agents (default 3).
+- Max agents at once (default 10), shown under Settings → AI.
 - Auto-investigate (default on).
 - Claude check: Always / Low confidence only / Off (default Always).
 
