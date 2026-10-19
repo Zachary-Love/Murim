@@ -8,13 +8,12 @@ export type Appearance = {
   texture: Texture; textureIntensity: number;
   uiFont: string; uiSize: number;
   termFont: string; termSize: number; // termFont "iterm" = the iTerm profile font; termSize 0 = its size
-  termColors: "iterm" | "theme";
 };
 
 export const DEFAULTS: Appearance = {
   mode: "dark", base: "#efe6d8", accent: "#f43f5e", contrast: 50,
   texture: "none", textureIntensity: 30,
-  uiFont: "jetbrains", uiSize: 13, termFont: "iterm", termSize: 0, termColors: "iterm",
+  uiFont: "jetbrains", uiSize: 13, termFont: "iterm", termSize: 0,
 };
 const PRESET = { dark: "#0a0a0a", light: "#fafafa" };
 export const ACCENTS = { Rose: "#f43f5e", Blue: "#3b82f6", Violet: "#8b5cf6", Green: "#22c55e", Amber: "#f59e0b", Slate: "#64748b" };

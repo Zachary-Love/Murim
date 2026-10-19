@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ReviewPr, ReviewFilters, Bucket, BUCKET_LABEL, SEV, OVERALL } from "./types";
 import { applyFilters, authorsOf, authorKey, authorLabel, reposOf, repoKey } from "./reviewFilter";
-import { PrIcon } from "./Icons";
+import { PrIcon, Loading } from "./Icons";
 
 // 16px round avatar: Linear picture, else initials (dashed ring for unlinked GitHub authors)
 export const Avatar = ({ url, label, unlinked }: { url?: string | null; label: string; unlinked?: boolean }) =>
@@ -12,7 +12,7 @@ const BUCKETS = Object.keys(BUCKET_LABEL) as Bucket[];
 type Dim = "authors" | "statuses" | "repos";
 const NONE: ReviewFilters = { authors: [], statuses: [], repos: [] };
 
-export default function ReviewList({ prs, error, open, onOpen }: { prs: ReviewPr[]; error: string | null; open: string | null; onOpen: (key: string) => void }) {
+export default function ReviewList({ prs, error, loading, open, onOpen }: { prs: ReviewPr[]; error: string | null; loading: boolean; open: string | null; onOpen: (key: string) => void }) {
   const [f, setF] = useState<ReviewFilters>(NONE);
   const [pop, setPop] = useState<Dim | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -85,6 +85,7 @@ export default function ReviewList({ prs, error, open, onOpen }: { prs: ReviewPr
         </div>
       )}
       {error && <div className="banner">{error}</div>}
+      {loading && <Loading label={prs.length ? "Refreshing…" : "Loading pull requests…"} small={prs.length > 0} />}
       <ul className="tasks">
         {shown.map((p) => (
           <li key={p.key}>
@@ -96,7 +97,7 @@ export default function ReviewList({ prs, error, open, onOpen }: { prs: ReviewPr
             </button>
           </li>
         ))}
-        {!prs.length && <li className="empty">Nothing to review</li>}
+        {!prs.length && !loading && <li className="empty">Nothing to review</li>}
         {prs.length > 0 && !shown.length && <li className="empty">No PRs match these filters</li>}
       </ul>
     </>

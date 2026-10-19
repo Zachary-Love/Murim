@@ -99,12 +99,6 @@ export default function AppearanceSettings() {
             onChange={(e) => set({ termSize: Math.min(20, Math.max(0, +e.target.value || 0)) })} />
         </div>
       </div>
-      <div className="lab">Terminal colours
-        <select value={a.termColors} onChange={(e) => set({ termColors: e.target.value as Appearance["termColors"] })}>
-          <option value="iterm">iTerm profile</option>
-          <option value="theme">Match Murim theme</option>
-        </select>
-      </div>
     </>
   );
 }

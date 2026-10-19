@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { PrIcon } from "./Icons";
+import { PrIcon, Loading } from "./Icons";
 import Markdown from "./Markdown";
 import DiffFiles from "./DiffFiles";
 
@@ -22,7 +22,7 @@ export default function ReviewView({ issueId, refreshKey, onRequested }: { issue
     try { await invoke(cmd, { issueId, ...args }); setErr(""); then?.(); } catch (e) { setErr(String(e)); }
     setBusy(false);
   };
-  if (!r) return err ? <div className="issue"><div className="banner">{err}</div></div> : <p className="empty-state">Loading diff…</p>;
+  if (!r) return err ? <div className="issue"><div className="banner">{err}</div></div> : <div className="empty-state"><Loading label="Loading diff…" /></div>;
   const dirty = r.uncommitted.length > 0 || r.unpushed > 0;
   return (
     <div className="issue review">

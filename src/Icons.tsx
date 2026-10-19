@@ -1,4 +1,10 @@
 import { STAGE_LABEL, type Stage, type Status } from "./types";
+import logo from "./assets/logo-mark.svg";
+
+/** The logo blade slashing in, on a loop: Murim's loading state. */
+export const Loading = ({ label, small }: { label: string; small?: boolean }) => (
+  <div className={`loading ${small ? "small" : ""}`}><img className="slash" src={logo} alt="" /><span>{label}</span></div>
+);
 
 const S = { width: 14, height: 14, viewBox: "0 0 14 14", fill: "none", strokeWidth: 1.5 } as const;
 

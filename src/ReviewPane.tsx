@@ -7,7 +7,7 @@ import DiffFiles from "./DiffFiles";
 import { Avatar } from "./ReviewList";
 import { authorLabel } from "./reviewFilter";
 import { ReviewPr, Session, Draft, OVERALL, SEV } from "./types";
-import { AgentIcon, PrIcon } from "./Icons";
+import { AgentIcon, PrIcon, Loading } from "./Icons";
 import logo from "./assets/logo-mark.svg";
 
 type Tab = "overview" | "diff" | "agent";
@@ -85,7 +85,7 @@ export default function ReviewPane({ pr, session }: { pr: ReviewPr; session?: Se
         </div>
       )}
 
-      {tab === "diff" && (diff ? <div className="issue review"><DiffFiles diff={diff.diff} truncated={diff.truncated} base={pr.base} /></div> : !err && <p className="empty-state">Loading diff…</p>)}
+      {tab === "diff" && (diff ? <div className="issue review"><DiffFiles diff={diff.diff} truncated={diff.truncated} base={pr.base} /></div> : !err && <div className="empty-state"><Loading label="Loading diff…" /></div>)}
 
       {tab === "agent" && (
         <div className="review-agent">

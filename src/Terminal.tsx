@@ -3,26 +3,29 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
-import { Appearance, currentAppearance, family, isLight, loadFont } from "./appearance";
+import { Appearance, currentAppearance, family, loadFont } from "./appearance";
+import { macKey } from "./macKeys";
+
+// The terminal should feel like the user's own iTerm, not part of Murim's theme (setup follows Orca's, also xterm.js):
+// iTerm profile colours, GPU rendering, Unicode 11 widths, kitty keyboard protocol, and iTerm's macOS key bindings.
 
 const bytes = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-// "Match Murim theme" palettes (iTerm2's defaults for dark and light backgrounds); also the fallback without an iTerm profile.
-const DARK = ["#000000", "#c91b00", "#00c200", "#c7c400", "#0225c7", "#c930c7", "#00c5c7", "#c7c7c7", "#686868", "#ff6e67", "#5ffa68", "#fffc67", "#6871ff", "#ff77ff", "#60fdff", "#ffffff"];
-const LIGHT = ["#000000", "#c91b00", "#00a600", "#999900", "#0225c7", "#b200b2", "#00a6b2", "#bfbfbf", "#666666", "#e50000", "#00d900", "#e5e500", "#0000ff", "#e500e5", "#00e5e5", "#e5e5e5"];
+// iTerm2's default dark palette: the fallback without an iTerm profile
+const ITERM_DARK = ["#000000", "#c91b00", "#00c200", "#c7c400", "#0225c7", "#c930c7", "#00c5c7", "#c7c7c7", "#686868", "#ff6e67", "#5ffa68", "#fffc67", "#6871ff", "#ff77ff", "#60fdff", "#ffffff"];
 const ANSI = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"];
 const ANSI_NAMES = [...ANSI, ...ANSI.map((c) => "bright" + c[0].toUpperCase() + c.slice(1))];
-type Profile = { background: string; foreground: string; cursor: string; selectionBackground: string; ansi: string[]; font?: string; fontSize?: number };
+type Profile = { background: string; foreground: string; cursor: string; selectionBackground: string; selectionForeground?: string; ansi: string[]; font?: string; fontSize?: number };
+const FALLBACK: Profile = { background: "#000000", foreground: "#c7c7c7", cursor: "#c7c7c7", selectionBackground: "#c1deff", selectionForeground: "#000000", ansi: ITERM_DARK };
 let profile: Promise<Profile | null> | null = null; // read once per app run
 
-/** xterm options for an appearance: the iTerm profile's colours/font, or Murim's theme tokens. */
+/** xterm options: the iTerm profile's colours; font from Settings → Appearance (default: the profile's). */
 function look(a: Appearance, p: Profile | null) {
-  const css = (v: string) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-  const useIterm = a.termColors === "iterm" && p;
-  const bg = useIterm ? p.background : css("--bg") || "#0a0a0a", fg = useIterm ? p.foreground : css("--text") || "#fafafa";
-  const ansi = useIterm ? p.ansi : isLight(bg) ? LIGHT : DARK;
-  const theme = { ...Object.fromEntries(ansi.map((c, i) => [ANSI_NAMES[i], c])), background: bg, foreground: fg,
-    cursor: useIterm ? p.cursor : css("--brand") || fg, cursorAccent: bg, selectionBackground: (useIterm ? p.selectionBackground : css("--brand") || "#888888") + "55" };
+  const c = p ?? FALLBACK;
+  const theme = { ...Object.fromEntries(c.ansi.map((x, i) => [ANSI_NAMES[i], x])), background: c.background, foreground: c.foreground,
+    cursor: c.cursor, cursorAccent: c.background, selectionBackground: c.selectionBackground, selectionForeground: c.selectionForeground };
   const fontFamily = a.termFont === "iterm" ? (p?.font ? `"${p.font}", ${family("jetbrains")}` : family("jetbrains")) : family(a.termFont);
   const fontSize = a.termSize || (a.termFont === "iterm" && p?.fontSize) || 12.5;
   return { theme, fontFamily, fontSize };
@@ -32,12 +35,29 @@ export default function Terminal({ issueId }: { issueId: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = ref.current!;
-    const term = new XTerm({ cursorBlink: true, ...look(currentAppearance(), null) });
+    let dead = false;
+    let prof: Profile | null = null;
+    const term = new XTerm({ cursorBlink: true, allowProposedApi: true, macOptionIsMeta: false, macOptionClickForcesSelection: true, vtExtensions: { kittyKeyboard: true }, ...look(currentAppearance(), null) });
     const fit = new FitAddon();
     term.loadAddon(fit);
+    term.loadAddon(new Unicode11Addon());
+    term.unicode.activeVersion = "11";
+    let webgl: WebglAddon | null = null;
+    const send = (data: string) => invoke("pty_write", { issueId, data }).catch(() => {});
+    // ponytail: xterm keeps the kitty flags internally; no public getter in 6.1
+    const kitty = () => ((term as unknown as { _core?: { coreService?: { kittyKeyboard?: { flags?: number } } } })._core?.coreService?.kittyKeyboard?.flags ?? 0) > 0;
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.isComposing) return true;
+      const k = macKey(e, kitty());
+      if (k === null) return true;
+      if (e.type === "keydown") {
+        e.preventDefault();
+        if (k === "top") term.scrollToTop(); else if (k === "bottom") term.scrollToBottom(); else if (k === "clear") term.clear(); else send(k);
+      }
+      return false;
+    });
     const resize = () => { if (!term.element) return; fit.fit(); invoke("pty_resize", { issueId, cols: term.cols, rows: term.rows }).catch(() => {}); };
-    // colours + font follow the iTerm profile or Murim's theme (Settings → Appearance), live
-    let prof: Profile | null = null;
+    // font follows Settings → Appearance live; colours are always the iTerm profile
     const restyle = (a: Appearance) => {
       const o = look(a, prof);
       term.options.theme = o.theme;
@@ -46,17 +66,33 @@ export default function Terminal({ issueId }: { issueId: string }) {
         if (dead) return;
         term.options.fontFamily = o.fontFamily;
         term.options.fontSize = o.fontSize;
+        webgl?.clearTextureAtlas();
         resize();
       });
     };
     const onLook = (e: Event) => restyle((e as CustomEvent).detail);
     window.addEventListener("murim-appearance", onLook);
-    (profile ??= invoke<Profile | null>("terminal_theme").catch(() => null)).then((p) => { prof = p; if (!dead) restyle(currentAppearance()); });
     const ro = new ResizeObserver(resize);
-    // xterm measures cells at open(): open only once the bundled font is loaded, or it sizes against the fallback.
-    let dead = false;
-    const o0 = look(currentAppearance(), null);
-    document.fonts.load(`${o0.fontSize}px ${o0.fontFamily}`).catch(() => {}).finally(() => { if (!dead) { term.open(el); ro.observe(el); } });
+    // open only once the profile and font are in: xterm measures cells at open(), and no flash of fallback colours
+    (profile ??= invoke<Profile | null>("terminal_theme").catch(() => null)).then(async (p) => {
+      prof = p;
+      const o = look(currentAppearance(), p);
+      term.options.theme = o.theme;
+      term.options.fontFamily = o.fontFamily;
+      term.options.fontSize = o.fontSize;
+      el.style.background = o.theme.background;
+      await loadFont(currentAppearance().termFont);
+      await document.fonts.load(`${o.fontSize}px ${o.fontFamily}`).catch(() => {});
+      if (dead) return;
+      term.open(el);
+      try {
+        webgl = new WebglAddon();
+        webgl.onContextLoss(() => { webgl?.dispose(); webgl = null; }); // falls back to the DOM renderer
+        term.loadAddon(webgl);
+      } catch { webgl = null; }
+      ro.observe(el);
+      term.focus();
+    });
     // Buffer live output until the snapshot is written so ordering holds (may duplicate a chunk at the seam).
     let ready = false;
     const pending: Uint8Array[] = [];
@@ -65,11 +101,13 @@ export default function Terminal({ issueId }: { issueId: string }) {
       const b = bytes(e.payload.data);
       ready ? term.write(b) : pending.push(b);
     });
+    // Replaying history re-runs old terminal queries (device attributes, kitty keyboard); their answers are stale, drop them.
+    let replaying = true;
     invoke<string>("pty_snapshot", { issueId })
-      .then((s) => term.write(bytes(s)))
+      .then((s) => new Promise<void>((done) => term.write(bytes(s), done)))
       .catch(() => {})
-      .finally(() => { ready = true; pending.forEach((b) => term.write(b)); resize(); });
-    const d = term.onData((data) => invoke("pty_write", { issueId, data }).catch(() => {}));
+      .finally(() => { replaying = false; ready = true; pending.forEach((b) => term.write(b)); resize(); });
+    const d = term.onData((data) => { if (!replaying) send(data); });
     return () => { dead = true; window.removeEventListener("murim-appearance", onLook); ro.disconnect(); d.dispose(); un.then((f) => f()); term.dispose(); };
   }, [issueId]);
   return <div className="term" ref={ref} />;

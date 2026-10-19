@@ -308,3 +308,16 @@ button.chip:hover { background: var(--hover); border-color: var(--line-hi); colo
 .runs .row:disabled { cursor: default; }
 .runs .st { font-size: 11px; color: var(--dim); }
 .runs .st.running { color: var(--blue); } .runs .st.waiting { color: var(--brand); } .runs .st.failed { color: var(--red); }
+
+/* loading: the logo blade slashes in bottom-left -> top-right, then fades (clip-path triangles keep 3 points to interpolate) */
+.loading { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 32px 8px; font-size: 12px; color: var(--muted); }
+.loading.small { flex-direction: row; justify-content: center; gap: 8px; padding: 6px 8px; }
+.loading .slash { width: 30px; height: 36px; animation: slash 1.3s cubic-bezier(.75, 0, .25, 1) infinite; }
+.loading.small .slash { width: 11px; height: 14px; }
+@keyframes slash {
+  0% { clip-path: polygon(0 100%, 0 100%, 0 100%); opacity: 1; transform: translate(-3px, 3px); }
+  40% { clip-path: polygon(0 100%, 0 -100%, 200% 100%); opacity: 1; transform: none; }
+  75% { clip-path: polygon(0 100%, 0 -100%, 200% 100%); opacity: 1; transform: none; }
+  100% { clip-path: polygon(0 100%, 0 -100%, 200% 100%); opacity: 0; transform: translate(3px, -3px); }
+}
+@media (prefers-reduced-motion: reduce) { .loading .slash { animation: pulse 1.6s ease-in-out infinite; } }

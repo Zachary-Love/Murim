@@ -10,6 +10,8 @@ pub struct Theme {
     pub cursor: String,
     #[serde(rename = "selectionBackground")]
     pub selection: String,
+    #[serde(rename = "selectionForeground")]
+    pub selection_text: Option<String>,
     pub ansi: Vec<String>,
     /// iTerm "Normal Font", e.g. "Monaco 12" -> ("Monaco", 12); the name is a PostScript name WebKit resolves locally
     pub font: Option<String>,
@@ -37,6 +39,7 @@ pub fn parse(bookmarks: &Value, default_guid: &str, dark: bool) -> Option<Theme>
         foreground: col("Foreground Color")?,
         cursor: col("Cursor Color")?,
         selection: col("Selection Color")?,
+        selection_text: col("Selected Text Color"),
         ansi: (0..16).map(|i| col(&format!("Ansi {i} Color"))).collect::<Option<_>>()?,
         font: b["Normal Font"].as_str().and_then(|f| f.rsplit_once(' ')).map(|(n, _)| n.to_string()),
         font_size: b["Normal Font"].as_str().and_then(|f| f.rsplit_once(' ')).and_then(|(_, s)| s.parse().ok()),

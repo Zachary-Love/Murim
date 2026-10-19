@@ -18,7 +18,7 @@ import logo from "./assets/logo-mark.svg";
 
 type Payload = { items: Item[]; error: string | null };
 type PrPayload = { prs: PrMap; error?: string | null };
-type RvPayload = { prs: ReviewPr[]; error: string | null };
+type RvPayload = { prs: ReviewPr[]; error: string | null; loaded: boolean };
 type View = "tasks" | "reviews" | "meditations" | "automations";
 const savedView = (): View => { try { const v = localStorage.getItem("murim.view"); return v === "reviews" || v === "meditations" || v === "automations" ? v : "tasks"; } catch { return "tasks"; } };
 
@@ -37,7 +37,8 @@ export default function App() {
   const [open, setOpen] = useState<string | null>(null);
   const [view, setView] = useState<View>(savedView);
   const [openReview, setOpenReview] = useState<string | null>(null); // a ReviewPr.key; kept apart from `open` so each mode keeps its selection
-  const [rv, setRv] = useState<RvPayload>({ prs: [], error: null });
+  const [rv, setRv] = useState<RvPayload>({ prs: [], error: null, loaded: false });
+  const [rvBusy, setRvBusy] = useState(false); // refresh clicked, poll not back yet
   const [openMed, setOpenMed] = useState<MedSel | null>(null);
   const [autos, setAutos] = useState<Automation[]>([]);
   const [openAuto, setOpenAuto] = useState<AutoSel | null>(null);
@@ -54,7 +55,7 @@ export default function App() {
     invoke<PrPayload>("get_prs").then(setPp).catch(() => {}); // ponytail: tolerate backend without get_prs
     const up = listen<PrPayload>("prs-updated", (e) => setPp(e.payload));
     invoke<RvPayload>("get_reviews").then(setRv).catch(() => {});
-    const ur = listen<RvPayload>("reviews-updated", (e) => setRv(e.payload));
+    const ur = listen<RvPayload>("reviews-updated", (e) => { setRv(e.payload); setRvBusy(false); });
     invoke<Automation[]>("list_automations").then(setAutos).catch(() => {});
     const ua = listen<Automation[]>("automations-updated", (e) => setAutos(e.payload));
     const onBadge = (e: Event) => setBadge((e as CustomEvent).detail);
@@ -115,8 +116,8 @@ export default function App() {
         ) : view === "meditations" ? (
           <MeditationList {...med} sessions={sessions} sel={showSettings ? null : openMed} onOpen={(m) => { setOpenMed(m); setShowSettings(false); }} noRepos={reposRoot === ""} />
         ) : view === "reviews" ? <>
-        <div className="section-label">Reviews <span className="count">{rv.prs.length}</span><button className="btn ghost new" title="Refresh reviews" onClick={() => invoke("refresh_reviews").catch(() => {})}><RefreshIcon /></button></div>
-        <ReviewList prs={rv.prs} error={rv.error} open={showSettings ? null : openReview} onOpen={(k) => { setOpenReview(k); setShowSettings(false); }} />
+        <div className="section-label">Reviews <span className="count">{rv.prs.length}</span><button className="btn ghost new" title="Refresh reviews" onClick={() => { setRvBusy(true); invoke("refresh_reviews").catch(() => setRvBusy(false)); }}><RefreshIcon /></button></div>
+        <ReviewList prs={rv.prs} error={rv.error} loading={!rv.loaded || rvBusy} open={showSettings ? null : openReview} onOpen={(k) => { setOpenReview(k); setShowSettings(false); }} />
         </> : <>
         <div className="section-label">My tasks <span className="count">{p.items.length}</span><button className="btn ghost new" title="Refresh tasks" onClick={() => invoke("refresh_inbox").catch(() => {})}><RefreshIcon /></button></div>
         {p.error && <div className="banner">{p.error}</div>}

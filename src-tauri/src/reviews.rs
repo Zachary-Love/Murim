@@ -180,6 +180,8 @@ pub fn parse_draft(s: &str) -> Result<Draft, String> {
 pub struct Payload {
     pub prs: Vec<ReviewPr>,
     pub error: Option<String>,
+    /// false until the first poll finishes (the frontend shows a loader instead of "Nothing to review")
+    pub loaded: bool,
 }
 
 #[derive(Default)]
@@ -251,12 +253,12 @@ pub fn combine(gh: Result<(String, Vec<ReviewPr>), String>, team: Result<Vec<Rev
     let (me, req) = gh.unwrap_or_default();
     let mut prs = merge(req, team.unwrap_or_default());
     prs.retain(|p| p.author_login != me && p.health.state == github::PrState::Open);
-    Payload { prs, error: (!errs.is_empty()).then(|| errs.join("; ")) }
+    Payload { prs, error: (!errs.is_empty()).then(|| errs.join("; ")), loaded: true }
 }
 
 fn poll(app: &AppHandle) {
     let p = match github::token() {
-        Err(e) => Payload { prs: vec![], error: Some(e) },
+        Err(e) => Payload { prs: vec![], error: Some(e), loaded: true },
         Ok(tok) => {
             let gh = requested(&tok);
             let skip: Vec<String> = gh.as_ref().map(|(_, v)| v.iter().map(|p| p.health.url.clone()).collect()).unwrap_or_default();
@@ -286,10 +288,8 @@ fn poll(app: &AppHandle) {
     }
     let st = app.state::<Reviews>();
     let mut cur = st.payload.lock().unwrap();
-    if *cur != p {
-        *cur = p;
-        let _ = app.emit("reviews-updated", &*cur);
-    }
+    *cur = p;
+    let _ = app.emit("reviews-updated", &*cur); // also when unchanged: it ends the frontend's refresh loader
 }
 
 pub fn start(app: AppHandle) {
