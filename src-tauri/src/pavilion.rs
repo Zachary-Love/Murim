@@ -459,7 +459,7 @@ fn reconcile(app: &AppHandle) {
                 priority: i.priority, reason: dec.reason, by: dec.by, action: dec.action, view: "tasks".into(), target: i.id.clone(), pr: prs.get(&i.id).cloned(),
                 session: inv.map(|_| inv_id(&i.id)), plan: rec.investigation.as_ref().filter(|x| x.status == InvStatus::PlanReady).map(|x| x.plan.clone()), updated_at: i.updated_at.clone(),
                 source: Source::Issue, stage: Some(stage_of(&v)), role: role_of(&v), summary: summary_of(&i.description), url: i.url.clone(),
-                verdict: if dec.action == Some(Action::DismissBlocker) { rec.blocker.clone() } else { rec.ready.clone() },
+                verdict: dec.by.and(if dec.action == Some(Action::DismissBlocker) { rec.blocker.clone() } else { rec.ready.clone() }),
             });
         }
         for p in &reviews {

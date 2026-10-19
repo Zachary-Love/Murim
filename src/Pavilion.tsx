@@ -55,10 +55,12 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
   }, []);
   useEffect(() => {
     if (!drawer) return;
-    const on = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") setDrawer(false); };
+    const on = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape" && !(e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable]")) setDrawer(false); };
     window.addEventListener("keydown", on);
     return () => window.removeEventListener("keydown", on);
   }, [drawer]);
+  const closeBtn = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (drawer) closeBtn.current?.querySelector<HTMLElement>(".pvi-x")?.focus(); }, [drawer]);
   useEffect(() => {
     const on = (e: globalThis.KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -76,13 +78,15 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
 
   const shown = filterCards(board.cards, filters);
   const card = board.cards.find((c) => c.key === sel) ?? shown[0] ?? board.cards[0];
+  // pin what the inspector shows so board updates or search typing do not swap the card and drop edits
+  useEffect(() => { if (card && card.key !== sel) setSel(card.key); }, [card?.key]); // eslint-disable-line react-hooks/exhaustive-deps
   const st = stats(board), counts = chipCounts(board.cards), repos = reposOf(board.cards);
   const updated = board.updated ? new Date(board.updated * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
   const refresh = () => Promise.all(["refresh_inbox", "refresh_prs", "refresh_reviews"].map((c) => run(c, {})));
 
   const cards: [string, Chip, ReactNode, string, string][] = [
     ["Needs you", "needsYou", two(st.needsYou), st.plans ? `${st.plans} plan${st.plans === 1 ? "" : "s"} to approve` : "nothing waiting", st.needsYou ? "var(--amber)" : "var(--text)"],
-    ["Agents working", "working", two(st.working), `${st.coding} coding · ${st.investigating} investigating · ${st.reviewing} reviewing`, "var(--green)"],
+    ["Agents working", "working", <>{two(st.working)}<span className="pv-max">/{st.max}</span></>, `${st.coding} coding · ${st.investigating} investigating · ${st.reviewing} reviewing`, "var(--green)"],
     ["Blocked", "blocked", two(st.blocked), st.inferred ? `${st.inferred} inferred` : "Linear relations", "var(--text)"],
     ["Open items", "all", two(st.open), "Linear + GitHub", "var(--text)"],
   ];
@@ -204,7 +208,7 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
       {narrow && drawer && inspector && (
         <>
           <div className="pv-backdrop" onClick={() => setDrawer(false)} />
-          <div className="pv-drawer" role="dialog" aria-modal="true" aria-label="Inspector">{inspector}</div>
+          <div className="pv-drawer" ref={closeBtn} role="dialog" aria-modal="true" aria-label="Inspector">{inspector}</div>
         </>
       )}
     </div>

@@ -17,12 +17,12 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
   run: (cmd: string, args: Record<string, unknown>) => Promise<boolean>;
   onOpen: (view: string, id: string) => void; onClose?: () => void;
 }) {
-  const [tab, setTab] = useState<Tab>("overview");
   const [text, setText] = useState(card.plan ?? "");
   const [edit, setEdit] = useState(false);
   const [busy, setBusy] = useState(false);
   const c = card, pr = c.pr, st = pill(c), step = stepOf(c.stage);
   const hasTerm = !!(c.session && sessions[c.session]);
+  const [tab, setTab] = useState<Tab>(hasTerm && c.column === "needsYou" && !c.plan ? "terminal" : "overview");
   const tabs = TABS.filter(([k]) => k === "overview" || (k === "plan" ? !!c.plan : k === "terminal" ? hasTerm : log.length > 0));
   const cur = tabs.some(([k]) => k === tab) ? tab : "overview";
   const view = VIEW_LABEL[c.view] ?? c.view;
@@ -82,7 +82,7 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
                 <div className="pvi-btns">
                   {c.action === "approvePlan" && <><button className="btn primary" disabled={busy || !text.trim()} onClick={approve}>Approve plan</button><button className="btn" onClick={() => { setTab("plan"); setEdit(true); }}>Edit plan</button></>}
                   {c.action === "startNow" && <button className="btn primary" disabled={busy} onClick={start}>Investigate anyway</button>}
-                  {!c.action && <button className="btn primary" onClick={open}>Open in {view}</button>}
+                  {!c.action && (hasTerm ? <button className="btn primary" onClick={() => setTab("terminal")}>Open terminal</button> : <button className="btn primary" onClick={open}>Open in {view}</button>)}
                 </div>
               </div>
             </section>
@@ -113,7 +113,7 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
               {pr && <Link k="Pull request" v={`#${pr.number}`} href={pr.url} />}
               {c.repo && <Link k="Repository" v={c.repo} />}
               {c.role && <Link k="Worker" v={ROLE_LABEL[c.role]} />}
-              <Link k="Runtime" v="Claude Code" />
+              {c.role && <Link k="Runtime" v="Claude Code" />}
             </dl>
           </section>
           {pr && (
@@ -148,6 +148,7 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
       </div>
       <div className="pvi-foot">
         <button className="btn" onClick={open}>Open in {view}</button>
+        {!c.action && hasTerm && <button className="btn primary" onClick={() => setTab("terminal")}>Open terminal</button>}
         {primary && <button className="btn primary" disabled={busy || primary.off} onClick={primary.go}>{primary.label}</button>}
       </div>
     </aside>
