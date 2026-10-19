@@ -12,6 +12,7 @@ list, puts Claude Code to work on a task with one button, and babysits the PR to
 
 | Feature | What it does |
 |---|---|
+| **Pavilion** | One board for everything: cycle issues, their PRs, PRs awaiting your review, and running automations and meditations, in Needs you · Working · Blocked · Queued · Watching. Linear "blocked by" relations hold issues back; a small local model (Ollama) judges whether an issue is ready or quietly waits on another, and Claude checks it. Ready issues get a read-only investigation that writes a plan; coding starts when you approve it (up to 3 agents at once). Verdicts are kept in `~/.murim/pavilion.json`, so unchanged issues aren't re-judged. |
 | **Tasks** | Your assigned issues in the active Linear cycle, each matched to a local repo. |
 | **Start agent** | Creates a git worktree on the issue's branch and runs your coding agent in it, with extra terminal tabs if you want them. With Claude Code it works in the background and you're notified only when it has a question. |
 | **Draft PR review** | After a quality pass, Claude opens a draft PR with its own title and description. You review the diff in Murim, then accept (marks it ready for review) or send changes back to Claude. |
@@ -41,6 +42,7 @@ System Settings → Privacy & Security → **Open Anyway**, or run `xattr -cr /A
 - A Linear personal API key (Linear settings → API → Personal API keys)
 - Your repos cloned under one folder (default `~/Documents/GitHub`)
 - To build from source: Rust, Node 20+, pnpm
+- Optional: [Ollama](https://ollama.com) with a small model (`ollama pull qwen3:4b`) for Pavilion's local judgement; without it Pavilion asks Claude.
 
 ## Build from source
 
@@ -88,6 +90,7 @@ Design notes for each feature live in [docs/specs](docs/specs).
   prefer **Ask permissions** for reviews. It is told not to post, and Murim only posts the draft when you click.
 - **Replies as you:** with Tempering replies on, Claude's replies to review comments are posted under your
   GitHub account. Set Review replies to Off in Settings to disable.
+- **Investigations read untrusted issue text.** They run in your repos folder with file edits disabled and your default permission mode; the plan they write is only acted on after you approve it.
 
 ## Releasing
 
