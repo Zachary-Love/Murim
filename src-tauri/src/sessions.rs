@@ -537,7 +537,9 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
         }
     }
     for (k, v) in vars {
-        if !(k.starts_with("CLAUDE") || k == "AI_AGENT") {
+        if k == "PATH" {
+            c.env(k, crate::docker::path_with_bin(v)); // docker queue wrappers first
+        } else if !(k.starts_with("CLAUDE") || k == "AI_AGENT") {
             c.env(k, v);
         }
     }
@@ -840,6 +842,13 @@ pub fn get_sessions(state: State<Sessions>) -> HashMap<String, SessionInfo> {
 #[tauri::command]
 pub fn pty_write(app: AppHandle, issue_id: String, data: String) -> Result<(), String> {
     write_pty(&app, &issue_id, data.as_bytes())
+}
+
+/// Cmd+V in the terminal (Terminal.tsx): the clipboard as text.
+#[tauri::command]
+pub fn clipboard_text() -> Result<String, String> {
+    let o = std::process::Command::new("pbpaste").output().map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&o.stdout).into_owned())
 }
 
 #[tauri::command]

@@ -52,7 +52,10 @@ export default function Terminal({ issueId }: { issueId: string }) {
       if (k === null) return true;
       if (e.type === "keydown") {
         e.preventDefault();
-        if (k === "top") term.scrollToTop(); else if (k === "bottom") term.scrollToBottom(); else if (k === "clear") term.clear(); else send(k);
+        if (k === "top") term.scrollToTop(); else if (k === "bottom") term.scrollToBottom(); else if (k === "clear") term.clear();
+        // Cmd+V ourselves: the menu's paste only lands when WebKit has the xterm textarea focused, which some panes lose
+        else if (k === "paste") invoke<string>("clipboard_text").then((t) => term.paste(t)).catch(() => {});
+        else send(k);
       }
       return false;
     });

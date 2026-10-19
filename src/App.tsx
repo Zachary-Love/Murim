@@ -164,7 +164,7 @@ export default function App() {
           : openAuto?.kind === "run" ? <RunPane key={openAuto.id} id={openAuto.id} auto={runAuto} session={sessions[openAuto.id]} />
           : <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Select an automation or create one.</p></div>
         ) : view === "meditations" ? (
-          medSession ? <SessionPane key={openMed!.id} id={openMed!.id} session={medSession} />
+          medSession ? <SessionPane key={openMed!.id} id={openMed!.id} session={medSession} title={medSession.name || "Meditation"} />
           : openMed?.kind === "artifact" ? <ArtifactPane key={openMed.id} path={openMed.id} modified={med.arts.find((a) => a.path === openMed.id)?.modified} />
           : <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Start a session or open an artifact.</p></div>
         ) : view === "reviews" ? (openPr

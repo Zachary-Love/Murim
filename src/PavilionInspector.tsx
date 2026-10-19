@@ -5,11 +5,12 @@ import type { Card, LogEntry, Session } from "./types";
 import { OVERALL, SEV } from "./types";
 import { PIPELINE, ROLE_LABEL, SOURCE_LABEL, VIEW_LABEL, pill, stepOf } from "./pavilionView";
 import { SessionPane } from "./MeditationPane";
+import ReviewView from "./ReviewView";
 import Markdown from "./Markdown";
 import { PrIcon } from "./Icons";
 
-type Tab = "overview" | "plan" | "terminal" | "activity";
-const TABS: [Tab, string][] = [["overview", "Overview"], ["plan", "Plan"], ["terminal", "Terminal"], ["activity", "Activity"]];
+type Tab = "overview" | "plan" | "review" | "terminal" | "activity";
+const TABS: [Tab, string][] = [["overview", "Overview"], ["plan", "Plan"], ["review", "Review"], ["terminal", "Terminal"], ["activity", "Activity"]];
 const TONE: Record<string, string> = { amber: "amber", red: "red", green: "green", blue: "blue", grey: "" };
 
 export default function PavilionInspector({ card, sessions, log, run, onOpen, onClose }: {
@@ -22,8 +23,11 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
   const [busy, setBusy] = useState(false);
   const c = card, pr = c.pr, st = pill(c), step = stepOf(c.stage);
   const hasTerm = !!(c.session && sessions[c.session]);
-  const [tab, setTab] = useState<Tab>(hasTerm && c.column === "needsYou" && !c.plan ? "terminal" : "overview");
-  const tabs = TABS.filter(([k]) => k === "overview" || (k === "plan" ? !!c.plan : k === "terminal" ? hasTerm : log.length > 0));
+  // the coding session's draft PR, reviewed here like Tasks → Review
+  const coding = c.source === "issue" && c.session === c.key ? sessions[c.key] : undefined;
+  const toReview = coding?.prFlow === "awaitingReview" || coding?.prFlow === "opened";
+  const [tab, setTab] = useState<Tab>(c.plan ? "plan" : toReview && coding?.status !== "needsInput" ? "review" : hasTerm && c.column === "needsYou" ? "terminal" : "overview");
+  const tabs = TABS.filter(([k]) => k === "overview" || (k === "plan" ? !!c.plan : k === "review" ? !!coding?.worktree : k === "terminal" ? hasTerm : log.length > 0));
   const cur = tabs.some(([k]) => k === tab) ? tab : "overview";
   const view = VIEW_LABEL[c.view] ?? c.view;
   const exec = async (cmd: string, args: Record<string, unknown>) => { setBusy(true); try { await run(cmd, args); } finally { setBusy(false); } };
@@ -80,9 +84,10 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
                 <div className="pvi-cap">Your decision</div>
                 <p>{c.reason}</p>
                 <div className="pvi-btns">
-                  {c.action === "approvePlan" && <><button className="btn primary" disabled={busy || !text.trim()} onClick={approve}>Approve plan</button><button className="btn" onClick={() => { setTab("plan"); setEdit(true); }}>Edit plan</button></>}
+                  {c.action === "approvePlan" && <><button className="btn primary" disabled={busy || !text.trim()} onClick={approve}>Approve plan</button><button className="btn" onClick={() => setTab("plan")}>View plan</button></>}
                   {c.action === "startNow" && <button className="btn primary" disabled={busy} onClick={start}>Investigate anyway</button>}
-                  {!c.action && (hasTerm ? <button className="btn primary" onClick={() => setTab("terminal")}>Open terminal</button> : <button className="btn primary" onClick={open}>Open in {view}</button>)}
+                  {!c.action && toReview && <button className="btn primary" onClick={() => setTab("review")}>Review PR</button>}
+                  {!c.action && !toReview && (hasTerm ? <button className="btn primary" onClick={() => setTab("terminal")}>Open terminal</button> : <button className="btn primary" onClick={open}>Open in {view}</button>)}
                 </div>
               </div>
             </section>
@@ -135,8 +140,11 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
             {edit ? <textarea value={text} onChange={(e) => setText(e.target.value)} aria-label="Plan" /> : <Markdown text={text} />}
           </section>
         )}
+        {cur === "review" && coding && (
+          <div className="pvi-term"><ReviewView issueId={c.key} refreshKey={`${coding.prFlow}:${coding.status}`} onRequested={() => setTab("terminal")} /></div>
+        )}
         {cur === "terminal" && hasTerm && c.session && (
-          <div className="pvi-term"><SessionPane id={c.session} session={sessions[c.session]} title={`Investigate ${c.ident || c.title}`} noun="investigation" /></div>
+          <div className="pvi-term"><SessionPane id={c.session} session={sessions[c.session]} title={c.session.startsWith("investigation:") ? `Investigate ${c.ident || c.title}` : c.ident || c.title} noun={c.session.startsWith("investigation:") ? "investigation" : c.source === "review" ? "review" : c.source === "agent" ? "run" : "task"} /></div>
         )}
         {cur === "activity" && (
           <ul className="pvi-sec pvi-log">
@@ -148,7 +156,7 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
       </div>
       <div className="pvi-foot">
         <button className="btn" onClick={open}>Open in {view}</button>
-        {!c.action && hasTerm && <button className="btn primary" onClick={() => setTab("terminal")}>Open terminal</button>}
+        {!c.action && hasTerm && <button className={`btn ${toReview ? "" : "primary"}`} onClick={() => setTab("terminal")}>Open terminal</button>}
         {primary && <button className="btn primary" disabled={busy || primary.off} onClick={primary.go}>{primary.label}</button>}
       </div>
     </aside>

@@ -411,10 +411,29 @@ pub fn load(app: &AppHandle) {
 
 pub fn start(app: AppHandle) {
     std::thread::spawn(move || loop {
+        heal(&app);
         reconcile(&app);
         let (m, cv) = &app.state::<Pavilion>().wake;
         drop(cv.wait_timeout_while(m.lock().unwrap(), Duration::from_secs(60), |woken| !*woken).unwrap().0);
         *m.lock().unwrap() = false;
+    });
+}
+
+/// "local model offline" otherwise only clears on the next judgement, and unchanged issues aren't re-judged:
+/// while offline, test the model in the background (at most one probe at a time, each loop tick) and clear it.
+fn heal(app: &AppHandle) {
+    static PROBING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if !pv(app).data.lock().unwrap().offline || PROBING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let cfg = settings::dir(&app).map(|d| settings::load(&d).pavilion).unwrap_or_default();
+        if judge::test_model(&cfg.ollama_url, &cfg.model).is_ok() {
+            pv(&app).data.lock().unwrap().offline = false;
+            poke(&app);
+        }
+        PROBING.store(false, std::sync::atomic::Ordering::SeqCst);
     });
 }
 
@@ -457,14 +476,14 @@ fn reconcile(app: &AppHandle) {
             cards.push(Card {
                 key: i.id.clone(), column: dec.column, ident: i.identifier.clone(), title: i.title.clone(), repo: it.repo.as_ref().map(|r| repo_name(&r.path)).unwrap_or_default(),
                 priority: i.priority, reason: dec.reason, by: dec.by, action: dec.action, view: "tasks".into(), target: i.id.clone(), pr: prs.get(&i.id).cloned(),
-                session: inv.map(|_| inv_id(&i.id)), plan: rec.investigation.as_ref().filter(|x| x.status == InvStatus::PlanReady).map(|x| x.plan.clone()), updated_at: i.updated_at.clone(),
+                session: if v.session.is_some() { Some(i.id.clone()) } else { inv.map(|_| inv_id(&i.id)) }, plan: rec.investigation.as_ref().filter(|x| x.status == InvStatus::PlanReady).map(|x| x.plan.clone()), updated_at: i.updated_at.clone(),
                 source: Source::Issue, stage: Some(stage_of(&v)), role: role_of(&v), summary: summary_of(&i.description), url: i.url.clone(),
                 verdict: dec.by.and(if dec.action == Some(Action::DismissBlocker) { rec.blocker.clone() } else { rec.ready.clone() }),
             });
         }
         for p in &reviews {
             let dec = decide_review(map.get(&p.session_id), crate::reviews::has_draft(p), p.requested);
-            cards.push(Card { key: p.key.clone(), column: dec.column, ident: format!("{}#{}", p.repo, p.number), title: p.health.title.clone(), repo: p.repo.clone(), reason: dec.reason, view: "reviews".into(), target: p.key.clone(), pr: Some(p.health.clone()), source: Source::Review, stage: Some(Stage::Review), role: map.get(&p.session_id).map(|_| Role::Reviewer), url: p.health.url.clone(), ..Default::default() });
+            cards.push(Card { key: p.key.clone(), column: dec.column, ident: format!("{}#{}", p.repo, p.number), title: p.health.title.clone(), repo: p.repo.clone(), reason: dec.reason, view: "reviews".into(), target: p.key.clone(), pr: Some(p.health.clone()), source: Source::Review, stage: Some(Stage::Review), role: map.get(&p.session_id).map(|_| Role::Reviewer), session: map.contains_key(&p.session_id).then(|| p.session_id.clone()), url: p.health.url.clone(), ..Default::default() });
         }
         for (id, s) in &map {
             if !(sessions::is_automation(id) || sessions::is_meditation(id)) {
@@ -472,7 +491,7 @@ fn reconcile(app: &AppHandle) {
             }
             let Some(dec) = decide_agent(s) else { continue };
             let view = if sessions::is_automation(id) { "automations" } else { "meditations" };
-            cards.push(Card { key: id.clone(), column: dec.column, title: s.name.clone(), reason: dec.reason, view: view.into(), target: id.clone(), source: Source::Agent, role: Some(if sessions::is_automation(id) { Role::Automation } else { Role::Meditation }), ..Default::default() });
+            cards.push(Card { key: id.clone(), column: dec.column, title: s.name.clone(), reason: dec.reason, view: view.into(), target: id.clone(), session: Some(id.clone()), source: Source::Agent, role: Some(if sessions::is_automation(id) { Role::Automation } else { Role::Meditation }), ..Default::default() });
         }
         cards.sort_by(|a, b| (a.column, a.priority == 0, a.priority, &a.ident).cmp(&(b.column, b.priority == 0, b.priority, &b.ident)));
         let (working, max) = (working(&map), cfg.pavilion.max_agents as usize);
@@ -653,6 +672,11 @@ pub fn pavilion_set_paused(app: AppHandle, paused: bool) {
 #[tauri::command]
 pub async fn pavilion_test_model(url: String, model: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || judge::test_model(&url, &model)).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn ollama_models(url: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || judge::models(&url)).await.map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]

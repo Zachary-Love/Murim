@@ -9,6 +9,7 @@ assert.equal(k("ArrowLeft", { metaKey: true }), "\x01");
 assert.equal(k("ArrowUp", { metaKey: true }), "top");
 assert.equal(k("k", { metaKey: true }), "clear");
 assert.equal(k("c", { metaKey: true }), null); // Cmd+C stays copy
+assert.equal(k("v", { metaKey: true }), "paste");
 assert.equal(k("Enter", { shiftKey: true }), "\x1b\r");
 assert.equal(k("Enter", { shiftKey: true }, true), null); // kitty: xterm encodes it
 assert.equal(k("ArrowRight", { altKey: true }), "\x1bf");

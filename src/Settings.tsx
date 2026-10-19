@@ -4,7 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import AppearanceSettings from "./AppearanceSettings";
 import { MODE_LABEL, AgentKind, ReplyMode } from "./types";
 
-type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { ollama_url: string; model: string; max_agents: number; auto_investigate: boolean; claude_check: "always" | "lowConfidence" | "off" } };
+type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_investigate: boolean; claude_check: "always" | "lowConfidence" | "off" } };
 
 export const SECTIONS = ["Appearance", "Prompts", "Folders", "AI", "Pavilion", "Accounts"] as const;
 export type Section = typeof SECTIONS[number];
@@ -27,6 +27,11 @@ export default function Settings({ tab }: { tab: Section }) {
   const [hasKey, setHasKey] = useState(false);
   const [msg, setMsg] = useState("");
   const [test, setTest] = useState("");
+  const [models, setModels] = useState<string[] | null>(null); // installed in Ollama; null = couldn't list
+  const [mErr, setMErr] = useState("");
+  const loadModels = (url: string) => invoke<string[]>("ollama_models", { url }).then((m) => { setModels(m); setMErr(""); }).catch((e) => { setModels(null); setMErr(String(e)); });
+  const ready = !!s;
+  useEffect(() => { if (ready && tab === "Pavilion") loadModels(s!.pavilion.ollama_url); }, [ready, tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     invoke<S>("get_settings").then(setS);
@@ -115,20 +120,31 @@ export default function Settings({ tab }: { tab: Section }) {
         <input type="number" min={1} max={50} value={s.pavilion.max_agents} onChange={(e) => setS({ ...s, pavilion: { ...s.pavilion, max_agents: Math.max(1, Number(e.target.value) || 1) } })} />
       </label>
       <p className="muted">How many agents Pavilion keeps working before it stops starting new investigations. Agents you start yourself aren't limited.</p>
+      <label>Docker jobs at once
+        <input type="number" min={0} max={20} value={s.pavilion.docker_slots} onChange={(e) => setS({ ...s, pavilion: { ...s.pavilion, docker_slots: Math.max(0, Math.min(20, Number(e.target.value) || 0)) } })} />
+      </label>
+      <p className="muted">Docker builds, runs and compose ups that agents can have going at once; the rest wait their turn so the Mac stays responsive. 0 turns the queue off. Applies to running agents too.</p>
       </>}
       {tab === "Pavilion" && (() => {
         const pv = s.pavilion, set = (p: Partial<S["pavilion"]>) => setS({ ...s, pavilion: { ...pv, ...p } });
         return <>
       <label>Ollama URL
-        <input className="mono" value={pv.ollama_url} onChange={(e) => set({ ollama_url: e.target.value })} />
+        <input className="mono" value={pv.ollama_url} onChange={(e) => set({ ollama_url: e.target.value })} onBlur={() => loadModels(pv.ollama_url)} />
       </label>
       <label>Local model
         <div className="group">
-          <input className="mono" value={pv.model} placeholder="qwen3:4b" onChange={(e) => set({ model: e.target.value })} />
+          {models?.length ? (
+            <select className="mono" value={pv.model} onChange={(e) => { set({ model: e.target.value }); setTest(""); }}>
+              {!models.includes(pv.model) && <option value={pv.model}>{pv.model || "Choose a model"} (not installed)</option>}
+              {models.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          ) : <input className="mono" value={pv.model} placeholder="qwen3:4b" onChange={(e) => set({ model: e.target.value })} />}
+          <button className="btn" type="button" title="Reload installed models" onClick={() => loadModels(pv.ollama_url)}>Refresh</button>
           <button className="btn" type="button" onClick={() => { setTest("Testing…"); invoke<string>("pavilion_test_model", { url: pv.ollama_url, model: pv.model }).then(setTest).catch((e) => setTest(String(e))); }}>Test</button>
         </div>
       </label>
       {test && <p className="muted">{test}</p>}
+      {mErr ? <p className="muted">{mErr}</p> : models && !models.length && <p className="muted">Ollama is running but has no models yet.</p>}
       <p className="muted">Install Ollama and run <code>ollama pull {pv.model || "qwen3:4b"}</code>. Without it, Pavilion's judgement calls go to Claude.</p>
       <label>Investigate ready issues automatically
         <select value={pv.auto_investigate ? "on" : "off"} onChange={(e) => set({ auto_investigate: e.target.value === "on" })}>

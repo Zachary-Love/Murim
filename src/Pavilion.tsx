@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import PavilionInspector from "./PavilionInspector";
 import { PrIcon, RefreshIcon } from "./Icons";
@@ -8,6 +8,8 @@ import { BOARD, CHIPS, NO_FILTERS, ROLE_LABEL, SOURCE_LABEL, ago, chipCounts, fi
 type Mode = "list" | "board";
 const KEY = "murim.pavilion.view";
 const NARROW = "(max-width: 1099px)";
+const WKEY = "murim.pavilion.inspector";
+const IW = 380, IW_MIN = 320, QUEUE_MIN = 360;
 const two = (n: number) => String(n).padStart(2, "0");
 const activate = (f: () => void) => (e: KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); f(); } };
 
@@ -46,6 +48,23 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
   const [drawer, setDrawer] = useState(false);
   const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW).matches);
   const search = useRef<HTMLInputElement>(null);
+  const [dock, setDock] = useState<{ running: number; waiting: number; slots: number } | null>(null);
+  useEffect(() => {
+    const poll = () => invoke<{ running: number; waiting: number; slots: number }>("docker_queue").then(setDock).catch(() => {});
+    poll();
+    const t = setInterval(poll, 3000);
+    return () => clearInterval(t);
+  }, []);
+  const panel = useRef<HTMLDivElement>(null);
+  const [iw, setIw] = useState(() => Number(localStorage.getItem(WKEY)) || IW);
+  const sizeTo = (w: number) => {
+    const max = (panel.current?.clientWidth ?? 1200) - QUEUE_MIN;
+    const v = Math.round(Math.max(IW_MIN, Math.min(max, w)));
+    setIw(v); localStorage.setItem(WKEY, String(v));
+  };
+  const dragTo = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) sizeTo(panel.current!.getBoundingClientRect().right - e.clientX);
+  };
 
   useEffect(() => {
     const mq = window.matchMedia(NARROW);
@@ -135,6 +154,7 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
           <div className="pv-actions">
             {board.localOffline && <span className="chip amber" title="Judgement calls go to Claude until Ollama answers (Settings → Pavilion)">local model offline</span>}
             {board.error && <span className="chip red" title={board.error}>Linear error</span>}
+            {!!dock?.slots && <span className={`chip ${dock.waiting ? "amber" : ""}`} title="Docker builds and runs started by agents (Settings → AI → Docker jobs at once)">docker {dock.running}/{dock.slots}{dock.waiting ? ` · ${dock.waiting} waiting` : ""}</span>}
             {updated && <span className="chip">updated {updated}</span>}
             <button className="btn" onClick={refresh}><RefreshIcon />Refresh</button>
             <button className={`btn ${board.paused ? "primary" : ""}`} title="Stop starting new investigations" onClick={() => run("pavilion_set_paused", { paused: !board.paused })}>{board.paused ? "Resume agents" : "Pause agents"}</button>
@@ -152,7 +172,7 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
           ))}
         </div>
 
-        <div className="pv-panel">
+        <div className="pv-panel" ref={panel}>
           <section className="pv-queue">
             <div className="pv-qhead">
               <h2>{mode === "list" ? "Work queue" : "Work by state"} <span className="count">{board.cards.length}</span></h2>
@@ -202,7 +222,12 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
               </div>
             )}
           </section>
-          {!narrow && inspector && <div className="pv-insp">{inspector}</div>}
+          {!narrow && inspector && <>
+            <div className="pv-split" role="separator" aria-orientation="vertical" aria-label="Resize inspector" aria-valuenow={iw} tabIndex={0} title="Drag to resize, double-click to reset"
+              onPointerDown={(e) => { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); }} onPointerMove={dragTo} onDoubleClick={() => sizeTo(IW)}
+              onKeyDown={(e) => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); sizeTo(iw + (e.key === "ArrowLeft" ? 24 : -24)); } }} />
+            <div className="pv-insp" style={{ width: iw }}>{inspector}</div>
+          </>}
         </div>
       </div>
       {narrow && drawer && inspector && (

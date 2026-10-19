@@ -1,6 +1,7 @@
 pub mod repo_match;
 pub mod settings;
 pub mod linear;
+pub mod docker;
 mod caffeine;
 mod inbox;
 mod github;
@@ -30,7 +31,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .invoke_handler(tauri::generate_handler![settings::get_settings, settings::save_settings, settings::set_linear_key, settings::has_linear_key, caffeine::set_caffeine, caffeine::get_caffeine, inbox::get_inbox, inbox::refresh_inbox, inbox::list_repos, inbox::set_issue_repo, linear::get_issue_detail, sessions::start_task, sessions::resume_task, sessions::stop_task, sessions::get_sessions, sessions::pty_write, sessions::pty_resize, sessions::pty_snapshot, sessions::open_shell, sessions::list_shells, sessions::close_shell, github::get_prs, github::refresh_prs, tempering::set_tempering, tempering::resolve_escalation, review::get_review, review::accept_pr, review::request_changes, reviews::get_reviews, reviews::refresh_reviews, settings::set_review_filters, settings::set_review_badge, settings::set_appearance, reviews::start_review_agent, reviews::get_review_draft, reviews::post_review, reviews::dismiss_review, reviews::get_pr_diff, term_theme::terminal_theme, meditations::start_meditation, meditations::rename_meditation, meditations::delete_meditation, meditations::list_artifacts, meditations::read_artifact, meditations::get_meditations_dir, automations::list_automations, automations::save_automation, automations::delete_automation, automations::run_automation_now, automations::delete_run, pavilion::get_pavilion, pavilion::pavilion_approve, pavilion::pavilion_dismiss_blocker, pavilion::pavilion_start_now, pavilion::pavilion_set_paused, pavilion::pavilion_test_model])
+        .invoke_handler(tauri::generate_handler![settings::get_settings, settings::save_settings, settings::set_linear_key, settings::has_linear_key, caffeine::set_caffeine, caffeine::get_caffeine, inbox::get_inbox, inbox::refresh_inbox, inbox::list_repos, inbox::set_issue_repo, linear::get_issue_detail, sessions::start_task, sessions::resume_task, sessions::stop_task, sessions::get_sessions, sessions::pty_write, sessions::clipboard_text, sessions::pty_resize, sessions::pty_snapshot, sessions::open_shell, sessions::list_shells, sessions::close_shell, github::get_prs, github::refresh_prs, tempering::set_tempering, tempering::resolve_escalation, review::get_review, review::accept_pr, review::request_changes, reviews::get_reviews, reviews::refresh_reviews, settings::set_review_filters, settings::set_review_badge, settings::set_appearance, reviews::start_review_agent, reviews::get_review_draft, reviews::post_review, reviews::dismiss_review, reviews::get_pr_diff, term_theme::terminal_theme, meditations::start_meditation, meditations::rename_meditation, meditations::delete_meditation, meditations::list_artifacts, meditations::read_artifact, meditations::get_meditations_dir, automations::list_automations, automations::save_automation, automations::delete_automation, automations::run_automation_now, automations::delete_run, pavilion::get_pavilion, pavilion::pavilion_approve, pavilion::pavilion_dismiss_blocker, pavilion::pavilion_start_now, pavilion::pavilion_set_paused, pavilion::pavilion_test_model, pavilion::ollama_models, docker::docker_queue])
         .manage(caffeine::Caffeine::default())
         .manage(inbox::Inbox::default())
         .manage(sessions::Sessions::default())
@@ -45,6 +46,7 @@ pub fn run() {
             }
             sessions::load(app.handle());
             pavilion::load(app.handle());
+            docker::install(settings::load(&settings::dir(app.handle())?).pavilion.docker_slots);
             app.manage(hooks::start(app.handle().clone())?);
             inbox::start(app.handle().clone());
             github::start(app.handle().clone());

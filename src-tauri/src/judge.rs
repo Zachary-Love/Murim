@@ -122,6 +122,19 @@ pub fn test_model(url: &str, model: &str) -> Result<String, String> {
     parse(&r, &ok).map(|_| format!("{model} answered")).ok_or(format!("Unexpected reply from {model}: {r}"))
 }
 
+/// Settings model picker: the models installed in Ollama.
+pub fn models(url: &str) -> Result<Vec<String>, String> {
+    let v: Value = ureq::get(&format!("{}/api/tags", url.trim_end_matches('/')))
+        .timeout(Duration::from_secs(5))
+        .call()
+        .map_err(|e| format!("Ollama not reachable at {url}: {e}"))?
+        .into_json()
+        .map_err(|e| format!("Ollama: {e}"))?;
+    let mut m: Vec<String> = v["models"].as_array().into_iter().flatten().filter_map(|x| x["name"].as_str().map(String::from)).collect();
+    m.sort();
+    Ok(m)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,5 +224,7 @@ mod tests {
     fn test_model_reports_reachability() {
         assert!(test_model(&stub(r#"{"message": {"content": "{\"answer\": \"ok\", \"reason\": \"t\", \"confidence\": 1}"}}"#), "m").is_ok());
         assert!(test_model(DOWN, "m").unwrap_err().contains("Ollama"));
+        assert_eq!(models(&stub(r#"{"models": [{"name": "qwen3:4b"}, {"name": "gemma3:1b"}]}"#)).unwrap(), ["gemma3:1b", "qwen3:4b"]);
+        assert!(models(DOWN).is_err());
     }
 }
