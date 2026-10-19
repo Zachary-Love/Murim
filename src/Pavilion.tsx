@@ -1,105 +1,206 @@
-import { useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import Markdown from "./Markdown";
-import { SessionPane } from "./MeditationPane";
-import { PrIcon } from "./Icons";
-import { SEV, OVERALL, type Board, type Card, type Column, type Session } from "./types";
+import PavilionInspector from "./PavilionInspector";
+import { PrIcon, RefreshIcon } from "./Icons";
+import { SEV, OVERALL, type Board, type Card, type LogEntry, type Session } from "./types";
+import { BOARD, CHIPS, NO_FILTERS, ROLE_LABEL, SOURCE_LABEL, ago, chipCounts, filterCards, pill, prioLabel, reposOf, stats, stepOf, type Chip, type Filters } from "./pavilionView";
 
-const COLS: [Column, string][] = [["needsYou", "Needs you"], ["working", "Working"], ["blocked", "Blocked"], ["queued", "Queued"], ["watching", "Watching"]];
-const PRIO = ["", "Urgent", "High", "Medium", "Low"];
-type Run = (cmd: string, args: Record<string, unknown>) => Promise<boolean>;
+type Mode = "list" | "board";
+const KEY = "murim.pavilion.view";
+const NARROW = "(max-width: 1099px)";
+const two = (n: number) => String(n).padStart(2, "0");
+const activate = (f: () => void) => (e: KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); f(); } };
 
-export default function Pavilion({ board, sessions, onOpen }: { board: Board; sessions: Record<string, Session>; onOpen: (view: string, id: string) => void }) {
+const Si = ({ children }: { children: ReactNode }) => (
+  <svg className="pv-si" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
+);
+const STAT_ICON = {
+  need: <Si><path d="M12 3 2 20h20L12 3z" /><path d="M12 10v4M12 17v.5" /></Si>,
+  work: <Si><rect x="5" y="8" width="14" height="11" rx="2" /><path d="M12 4v4M9 13v1M15 13v1" /></Si>,
+  blocked: <Si><circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="12" r="2" /><path d="M6 7v10M8 12h8" /></Si>,
+  open: <Si><path d="M4 6h16M4 12h16M4 18h16" /></Si>,
+};
+
+function Meta({ c }: { c: Card }) {
+  const prio = prioLabel(c.priority);
+  return (
+    <div className="pv-ident">
+      {c.ident && <span className="pv-id">{c.ident}</span>}
+      {c.pr && <span className="pv-prn"><PrIcon color={SEV[c.pr.overall] ?? "grey"} title={`${OVERALL[c.pr.overall] ?? c.pr.overall} #${c.pr.number}`} />#{c.pr.number}</span>}
+      {c.repo && (c.ident || c.pr) && <span className="pv-sep">·</span>}
+      {c.repo && <span className="pv-repo">{c.repo}</span>}
+      {prio && <span className="pv-prio">{prio}</span>}
+    </div>
+  );
+}
+
+const Avatar = ({ c }: { c: Card }) => c.role ? <><span className="pv-av">{ROLE_LABEL[c.role][0]}</span><span>{ROLE_LABEL[c.role]}</span></> : null;
+
+export default function Pavilion({ board, sessions, logs, onOpen }: {
+  board: Board; sessions: Record<string, Session>; logs: Record<string, LogEntry[]>; onOpen: (view: string, id: string) => void;
+}) {
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [mode, setMode] = useState<Mode>(() => (localStorage.getItem(KEY) === "board" ? "board" : "list"));
   const [sel, setSel] = useState<string | null>(null);
   const [err, setErr] = useState("");
-  const [showDone, setShowDone] = useState(false);
-  const run: Run = (cmd, args) => invoke(cmd, args).then(() => { setErr(""); return true; }).catch((e) => { setErr(String(e)); return false; });
-  // plan / investigation cards open in the side panel; everything else jumps to its own view
-  const open = (c: Card) => (c.plan || c.session ? setSel(sel === c.key ? null : c.key) : onOpen(c.view, c.target));
-  const card = board.cards.find((c) => c.key === sel);
-  const done = board.cards.filter((c) => c.column === "done");
+  const [drawer, setDrawer] = useState(false);
+  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW).matches);
+  const search = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const mq = window.matchMedia(NARROW);
+    const on = () => { setNarrow(mq.matches); if (!mq.matches) setDrawer(false); };
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  useEffect(() => {
+    const on = (e: globalThis.KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey || t?.closest("input, textarea, select, [contenteditable]")) return;
+      e.preventDefault(); search.current?.focus();
+    };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, []);
+
+  const run = (cmd: string, args: Record<string, unknown>) => invoke(cmd, args).then(() => { setErr(""); return true; }).catch((e) => { setErr(String(e)); return false; });
+  const setView = (m: Mode) => { setMode(m); localStorage.setItem(KEY, m); };
+  const set = (p: Partial<Filters>) => setFilters((f) => ({ ...f, ...p }));
+  const pick = (c: Card) => { setSel(c.key); if (narrow) setDrawer(true); };
+
+  const shown = filterCards(board.cards, filters);
+  const card = board.cards.find((c) => c.key === sel) ?? shown[0] ?? board.cards[0];
+  const st = stats(board), counts = chipCounts(board.cards), repos = reposOf(board.cards);
   const updated = board.updated ? new Date(board.updated * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  const refresh = () => Promise.all(["refresh_inbox", "refresh_prs", "refresh_reviews"].map((c) => run(c, {})));
+
+  const cards: [string, Chip, ReactNode, string, string][] = [
+    ["Needs you", "needsYou", two(st.needsYou), st.plans ? `${st.plans} plan${st.plans === 1 ? "" : "s"} to approve` : "nothing waiting", st.needsYou ? "var(--amber)" : "var(--text)"],
+    ["Agents working", "working", two(st.working), `${st.coding} coding · ${st.investigating} investigating · ${st.reviewing} reviewing`, "var(--green)"],
+    ["Blocked", "blocked", two(st.blocked), st.inferred ? `${st.inferred} inferred` : "Linear relations", "var(--text)"],
+    ["Open items", "all", two(st.open), "Linear + GitHub", "var(--text)"],
+  ];
+  const icons = [STAT_ICON.need, STAT_ICON.work, STAT_ICON.blocked, STAT_ICON.open];
+
+  const row = (c: Card) => {
+    const p = pill(c), step = stepOf(c.stage);
+    return (
+      <div key={c.key} className={`pv-row ${c.key === card?.key ? "on" : ""}`} role="button" tabIndex={0} onClick={() => pick(c)} onKeyDown={activate(() => pick(c))}>
+        <div className="pv-rmain">
+          <Meta c={c} />
+          <div className="pv-title">{c.title}</div>
+          {c.reason && <div className={`pv-reason ${p.tone}`}><span className="pv-dot" />{c.reason}</div>}
+        </div>
+        <div className="pv-rside">
+          <span className={`chip ${p.tone === "grey" ? "" : p.tone}`}>{p.label}</span>
+          <div className="pv-who"><Avatar c={c} />{c.updatedAt && <span className="pv-ago">{ago(c.updatedAt)}</span>}</div>
+          {step >= 0 && <div className="pv-bar"><i style={{ width: `${((step + 1) / 6) * 100}%` }} /></div>}
+        </div>
+      </div>
+    );
+  };
+  const mini = (c: Card) => (
+    <div key={c.key} className={`pv-mini ${c.key === card?.key ? "on" : ""}`} role="button" tabIndex={0} onClick={() => pick(c)} onKeyDown={activate(() => pick(c))}>
+      <Meta c={{ ...c, repo: "", priority: 0 }} />
+      <div className="pv-title">{c.title}</div>
+      {c.reason && <div className="pv-mreason">{c.reason}</div>}
+      <div className="pv-mfoot"><span>{c.repo}</span><span>{c.role ? ROLE_LABEL[c.role] : ""}</span></div>
+    </div>
+  );
+
+  const inspector = card && (
+    <PavilionInspector key={card.key + ":" + (card.plan ?? "")} card={card} sessions={sessions} log={logs[card.key] ?? []} run={run} onOpen={onOpen} onClose={narrow ? () => setDrawer(false) : undefined} />
+  );
+
   return (
     <div className="pane pavilion">
-      <header className="topbar" data-tauri-drag-region>
-        <h2 data-tauri-drag-region>Pavilion</h2>
-        <div className="topbar-right" data-tauri-drag-region>
-          {board.localOffline && <span className="chip amber" title="Judgement calls go to Claude until Ollama answers (Settings → Pavilion)">local model offline</span>}
-          {board.error && <span className="chip red" title={board.error}>Linear error</span>}
-          <span className="muted">{board.working}/{board.max} agents{updated && ` · updated ${updated}`}</span>
-          <button className={`btn toggle ${board.paused ? "on" : ""}`} title="Stop starting new investigations" onClick={() => run("pavilion_set_paused", { paused: !board.paused })}>{board.paused ? "Paused" : "Pause"}</button>
-        </div>
-      </header>
-      {err && <div className="banner">{err}</div>}
-      <div className="pv-body">
-        <div className="pv-main">
-          <div className="pv-cols">
-            {COLS.map(([id, label]) => {
-              const cs = board.cards.filter((c) => c.column === id);
-              return (
-                <section key={id} className={`pv-col ${cs.length ? "" : "empty"}`}>
-                  <div className="section-label">{label} <span className={`count ${id === "needsYou" && cs.length ? "attn" : ""}`}>{cs.length}</span></div>
-                  {cs.map((c) => <CardView key={c.key} c={c} on={c.key === sel} onOpen={() => open(c)} onEdit={() => setSel(c.key)} run={run} />)}
-                </section>
-              );
-            })}
+      <div className="pv-drag" data-tauri-drag-region />
+      <div className="pv-scroll">
+        <header className="pv-head">
+          <div>
+            <div className="pv-eyebrow">PAVILION</div>
+            <h1>Pavilion<span>.</span></h1>
+            <p>Every issue, PR and agent in one place.</p>
           </div>
-          {done.length > 0 && (
-            <div className="pv-done">
-              <button className="btn ghost" onClick={() => setShowDone(!showDone)}>{showDone ? "▾" : "▸"} Done <span className="count">{done.length}</span></button>
-              {showDone && <div className="pv-cols">{done.map((c) => <CardView key={c.key} c={c} on={false} onOpen={() => open(c)} onEdit={() => setSel(c.key)} run={run} />)}</div>}
-            </div>
-          )}
-          {!board.cards.length && <div className="empty-state"><p>Nothing on the board yet. Cycle issues, review PRs and running agents show up here.</p></div>}
-        </div>
-        {card?.plan ? <PlanPanel key={card.key + ":" + card.plan} c={card} run={run} onClose={() => setSel(null)} />
-          : card?.session && sessions[card.session] ? (
-            <aside className="pv-side"><SessionPane key={card.session} id={card.session} session={sessions[card.session]} title={`Investigate ${card.ident}`} noun="investigation" /></aside>
-          ) : null}
-      </div>
-    </div>
-  );
-}
+          <div className="pv-actions">
+            {board.localOffline && <span className="chip amber" title="Judgement calls go to Claude until Ollama answers (Settings → Pavilion)">local model offline</span>}
+            {board.error && <span className="chip red" title={board.error}>Linear error</span>}
+            {updated && <span className="chip">updated {updated}</span>}
+            <button className="btn" onClick={refresh}><RefreshIcon />Refresh</button>
+            <button className={`btn ${board.paused ? "primary" : ""}`} title="Stop starting new investigations" onClick={() => run("pavilion_set_paused", { paused: !board.paused })}>{board.paused ? "Resume agents" : "Pause agents"}</button>
+          </div>
+        </header>
+        {err && <div className="banner">{err}</div>}
 
-function CardView({ c, on, onOpen, onEdit, run }: { c: Card; on: boolean; onOpen: () => void; onEdit: () => void; run: Run }) {
-  return (
-    <div className={`pv-card ${on ? "on" : ""}`}>
-      <div className="pv-hit" role="button" tabIndex={0} title={c.title} onClick={onOpen} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}>
-      <div className="pv-top">
-        {c.ident && <span className="ident">{c.ident}</span>}
-        {c.repo && <span className="muted">{c.repo}</span>}
-        {c.priority > 0 && <span className="muted">{PRIO[c.priority]}</span>}
-        {c.pr && <PrIcon color={SEV[c.pr.overall] ?? "grey"} title={`${OVERALL[c.pr.overall] ?? c.pr.overall} #${c.pr.number}`} />}
-        {c.by && <span className="chip" title="Placed here by a judgement call">{c.by === "claude" ? "Claude-checked" : "local"}</span>}
-      </div>
-      <div className="t">{c.title}</div>
-      <div className="pv-reason">{c.reason}</div>
-      </div>
-      {c.action && (
-        <div className="group">
-          {c.action === "approvePlan" && <><button className="btn primary" onClick={() => run("pavilion_approve", { issueId: c.key, plan: c.plan ?? "" })}>Approve plan</button><button className="btn" onClick={onEdit}>Edit</button></>}
-          {c.action === "dismissBlocker" && <button className="btn" onClick={() => run("pavilion_dismiss_blocker", { issueId: c.key })}>Dismiss</button>}
-          {c.action === "startNow" && <button className="btn" onClick={() => run("pavilion_start_now", { issueId: c.key })}>Start now</button>}
+        <div className="pv-stats">
+          {cards.map(([label, chip, n, sub, color], i) => (
+            <div key={label} className={`pv-stat ${filters.chip === chip ? "on" : ""}`} role="button" tabIndex={0} onClick={() => set({ chip })} onKeyDown={activate(() => set({ chip }))}>
+              <div className="pv-slabel">{icons[i]}{label}</div>
+              <div className="pv-num" style={{ color }}>{n}</div>
+              <div className="pv-ssub">{sub}</div>
+            </div>
+          ))}
         </div>
+
+        <div className="pv-panel">
+          <section className="pv-queue">
+            <div className="pv-qhead">
+              <h2>{mode === "list" ? "Work queue" : "Work by state"} <span className="count">{board.cards.length}</span></h2>
+              <div className="pv-seg">
+                {(["list", "board"] as Mode[]).map((m) => <button key={m} className={mode === m ? "on" : ""} onClick={() => setView(m)}>{m === "list" ? "List" : "Board"}</button>)}
+              </div>
+            </div>
+            <div className="pv-chips">
+              {CHIPS.map(([k, label]) => <button key={k} className={`chip ${filters.chip === k ? "on" : ""}`} onClick={() => set({ chip: k })}>{label} <span className="count">{counts[k]}</span></button>)}
+            </div>
+            <div className="pv-filters">
+              <div className="pv-search">
+                <input ref={search} value={filters.q} placeholder="Search issues, PRs, repos…" onChange={(e) => set({ q: e.target.value })} onKeyDown={(e) => { if (e.key === "Escape") e.currentTarget.blur(); }} />
+                <kbd>/</kbd>
+              </div>
+              <select value={filters.source} onChange={(e) => set({ source: e.target.value as Filters["source"] })}>
+                <option value="all">All sources</option>
+                {Object.entries(SOURCE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+              <select value={filters.repo} onChange={(e) => set({ repo: e.target.value })}>
+                <option value="all">All repositories</option>
+                {repos.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <button className="btn ghost" onClick={() => setFilters(NO_FILTERS)}>Clear</button>
+            </div>
+            <div className="pv-result"><span>Showing {shown.length} of {board.cards.length}</span><span>Click a row to inspect</span></div>
+
+            {!board.cards.length ? (
+              <div className="empty-state"><p>Nothing on the board yet. Cycle issues, review PRs and running agents show up here.</p></div>
+            ) : mode === "list" ? (
+              shown.length ? <div className="pv-list">{shown.map(row)}</div> : (
+                <div className="empty-state"><p>Nothing matches these filters</p><button className="btn" onClick={() => setFilters(NO_FILTERS)}>Clear</button></div>
+              )
+            ) : !shown.length ? (
+              <div className="empty-state"><p>Nothing matches these filters</p><button className="btn" onClick={() => setFilters(NO_FILTERS)}>Clear</button></div>
+            ) : (
+              <div className="pv-board">
+                {BOARD.map(([label, cols]) => {
+                  const cs = shown.filter((c) => cols.includes(c.column));
+                  return (
+                    <div key={label} className="pv-bcol">
+                      <div className="pv-bhead">{label}<span className="count">{cs.length}</span></div>
+                      {cs.length ? cs.map(mini) : <div className="pv-none">Nothing here</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+          {!narrow && inspector && <div className="pv-insp">{inspector}</div>}
+        </div>
+      </div>
+      {narrow && drawer && inspector && (
+        <>
+          <div className="pv-backdrop" onClick={() => setDrawer(false)} />
+          <div className="pv-drawer">{inspector}</div>
+        </>
       )}
     </div>
-  );
-}
-
-function PlanPanel({ c, run, onClose }: { c: Card; run: Run; onClose: () => void }) {
-  const [text, setText] = useState(c.plan ?? "");
-  const [edit, setEdit] = useState(false);
-  return (
-    <aside className="pv-side pane">
-      <header className="topbar">
-        <span className="pane-title">{c.ident} plan</span>
-        <div className="topbar-right">
-          <button className="btn" onClick={() => setEdit(!edit)}>{edit ? "Preview" : "Edit"}</button>
-          <button className="btn primary" disabled={!text.trim()} onClick={() => run("pavilion_approve", { issueId: c.key, plan: text }).then((ok) => ok && onClose())}>Approve → start coding</button>
-          <button className="btn ghost icon" title="Close" onClick={onClose}>✕</button>
-        </div>
-      </header>
-      <div className="pv-plan">{edit ? <textarea value={text} onChange={(e) => setText(e.target.value)} /> : <Markdown text={text} />}</div>
-    </aside>
   );
 }

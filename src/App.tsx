@@ -158,7 +158,7 @@ export default function App() {
       </aside>
       )}
       <main className="main">
-        {showSettings ? <Settings tab={settingsTab} /> : view === "pavilion" ? <Pavilion board={board} sessions={sessions} onOpen={(v, id) => go(v as View, id)} /> : view === "automations" ? (
+        {showSettings ? <Settings tab={settingsTab} /> : view === "pavilion" ? <Pavilion board={board} sessions={sessions} logs={logs} onOpen={(v, id) => go(v as View, id)} /> : view === "automations" ? (
           editAuto ? <AutomationPane key={openAuto!.id} auto={editAuto} sessions={sessions} onOpen={setOpenAuto}
             onSaved={(a) => { setAutos((l) => l.some((x) => x.id === a.id) ? l.map((x) => x.id === a.id ? a : x) : [...l, a]); setOpenAuto({ kind: "automation", id: a.id }); }} />
           : openAuto?.kind === "run" ? <RunPane key={openAuto.id} id={openAuto.id} auto={runAuto} session={sessions[openAuto.id]} />
