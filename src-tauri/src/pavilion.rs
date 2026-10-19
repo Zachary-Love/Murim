@@ -71,6 +71,37 @@ pub enum Action {
     StartNow,
 }
 
+#[derive(Serialize, Clone, Copy, PartialEq, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Source {
+    #[default]
+    Issue,
+    Review,
+    Agent,
+}
+
+/// Where an issue is in Murim's flow (the inspector's pipeline).
+#[derive(Serialize, Clone, Copy, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub enum Stage {
+    Triage,
+    Investigate,
+    Plan,
+    Implement,
+    Review,
+    Merged,
+}
+
+#[derive(Serialize, Clone, Copy, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub enum Role {
+    Investigator,
+    Coder,
+    Reviewer,
+    Automation,
+    Meditation,
+}
+
 #[derive(Serialize, Clone, Default, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Card {
@@ -94,6 +125,16 @@ pub struct Card {
     pub session: Option<String>,
     pub plan: Option<String>,
     pub updated_at: String,
+    pub source: Source,
+    pub stage: Option<Stage>,
+    /// who is (or was last) on it
+    pub role: Option<Role>,
+    /// first paragraph of the issue description
+    pub summary: String,
+    /// Linear issue or PR url
+    pub url: String,
+    /// the judgement behind the column, if any (inspector)
+    pub verdict: Option<Verdict>,
 }
 
 #[derive(PartialEq, Debug)]
@@ -141,6 +182,32 @@ pub fn fingerprint(i: &Issue) -> String {
 
 pub fn inv_id(issue_id: &str) -> String {
     format!("investigation:{issue_id}")
+}
+
+pub fn stage_of(v: &IssueView) -> Stage {
+    let inv = v.rec.investigation.as_ref().map(|i| i.status);
+    match v.pr {
+        Some(p) if p.state == PrState::Merged => Stage::Merged,
+        Some(_) => Stage::Review,
+        None if v.session.is_some() || inv == Some(InvStatus::Approved) => Stage::Implement,
+        None if inv == Some(InvStatus::PlanReady) => Stage::Plan,
+        None if inv.is_some() || v.inv.is_some() => Stage::Investigate,
+        None => Stage::Triage,
+    }
+}
+
+pub fn role_of(v: &IssueView) -> Option<Role> {
+    if v.session.is_some() {
+        Some(Role::Coder)
+    } else {
+        v.inv.map(|_| Role::Investigator)
+    }
+}
+
+/// First non-empty paragraph, capped at 280 chars for the inspector.
+pub fn summary_of(desc: &str) -> String {
+    let p = desc.split("\n\n").map(str::trim).find(|p| !p.is_empty()).unwrap_or("");
+    if p.chars().count() > 280 { format!("{}…", p.chars().take(279).collect::<String>()) } else { p.to_string() }
 }
 
 /// Column for a cycle issue, in spec precedence: Done > session needs > investigation > working > blocked > verdicts.
@@ -382,7 +449,8 @@ fn reconcile(app: &AppHandle) {
             let i = &it.issue;
             let rec = g.store.items.get(&i.id).unwrap_or(&empty);
             let inv = map.get(&inv_id(&i.id));
-            let dec = decide(&IssueView { issue: i, session: map.get(&i.id), inv, pr: prs.get(&i.id), rec, board: &board_ids });
+            let v = IssueView { issue: i, session: map.get(&i.id), inv, pr: prs.get(&i.id), rec, board: &board_ids };
+            let dec = decide(&v);
             if !dec.ask.is_empty() {
                 asks.push((i.clone(), dec.ask.clone()));
             }
@@ -390,11 +458,13 @@ fn reconcile(app: &AppHandle) {
                 key: i.id.clone(), column: dec.column, ident: i.identifier.clone(), title: i.title.clone(), repo: it.repo.as_ref().map(|r| repo_name(&r.path)).unwrap_or_default(),
                 priority: i.priority, reason: dec.reason, by: dec.by, action: dec.action, view: "tasks".into(), target: i.id.clone(), pr: prs.get(&i.id).cloned(),
                 session: inv.map(|_| inv_id(&i.id)), plan: rec.investigation.as_ref().filter(|x| x.status == InvStatus::PlanReady).map(|x| x.plan.clone()), updated_at: i.updated_at.clone(),
+                source: Source::Issue, stage: Some(stage_of(&v)), role: role_of(&v), summary: summary_of(&i.description), url: i.url.clone(),
+                verdict: if dec.action == Some(Action::DismissBlocker) { rec.blocker.clone() } else { rec.ready.clone() },
             });
         }
         for p in &reviews {
             let dec = decide_review(map.get(&p.session_id), crate::reviews::has_draft(p), p.requested);
-            cards.push(Card { key: p.key.clone(), column: dec.column, ident: format!("{}#{}", p.repo, p.number), title: p.health.title.clone(), repo: p.repo.clone(), reason: dec.reason, view: "reviews".into(), target: p.key.clone(), pr: Some(p.health.clone()), ..Default::default() });
+            cards.push(Card { key: p.key.clone(), column: dec.column, ident: format!("{}#{}", p.repo, p.number), title: p.health.title.clone(), repo: p.repo.clone(), reason: dec.reason, view: "reviews".into(), target: p.key.clone(), pr: Some(p.health.clone()), source: Source::Review, stage: Some(Stage::Review), role: map.get(&p.session_id).map(|_| Role::Reviewer), url: p.health.url.clone(), ..Default::default() });
         }
         for (id, s) in &map {
             if !(sessions::is_automation(id) || sessions::is_meditation(id)) {
@@ -402,7 +472,7 @@ fn reconcile(app: &AppHandle) {
             }
             let Some(dec) = decide_agent(s) else { continue };
             let view = if sessions::is_automation(id) { "automations" } else { "meditations" };
-            cards.push(Card { key: id.clone(), column: dec.column, title: s.name.clone(), reason: dec.reason, view: view.into(), target: id.clone(), ..Default::default() });
+            cards.push(Card { key: id.clone(), column: dec.column, title: s.name.clone(), reason: dec.reason, view: view.into(), target: id.clone(), source: Source::Agent, role: Some(if sessions::is_automation(id) { Role::Automation } else { Role::Meditation }), ..Default::default() });
         }
         cards.sort_by(|a, b| (a.column, a.priority == 0, a.priority, &a.ident).cmp(&(b.column, b.priority == 0, b.priority, &b.ident)));
         let (working, max) = (working(&map), cfg.pavilion.max_agents as usize);
@@ -611,6 +681,9 @@ mod tests {
         let board: HashSet<String> = ["MUR-1".to_string(), "MUR-2".to_string()].into();
         decide(&IssueView { issue: i, session, inv, pr, rec, board: &board })
     }
+    fn view<'a>(i: &'a Issue, board: &'a HashSet<String>, session: Option<&'a SessionInfo>, inv: Option<&'a SessionInfo>, pr: Option<&'a PrHealth>, rec: &'a Record) -> IssueView<'a> {
+        IssueView { issue: i, session, inv, pr, rec, board }
+    }
     fn col(d: &Decision) -> (Column, &str) {
         (d.column, d.reason.as_str())
     }
@@ -769,5 +842,34 @@ mod tests {
         let c = crate::linear::Comment { author: "Ann".into(), body: "wait for design".into(), created_at: "x".into() };
         assert!(issue_text(&i, &[c]).contains("Ann: wait for design"));
         assert!(issue_text(&i, &[]).contains("(none)"));
+    }
+
+    #[test]
+    fn stage_and_role_follow_the_flow() {
+        let i = issue("1");
+        let board: HashSet<String> = HashSet::new();
+        let r = Record::default();
+        let (s, iv) = (sess("1", "working"), sess("investigation:1", "working"));
+        let (open, merged) = (pr(Overall::AwaitingReview, PrState::Open), pr(Overall::Merged, PrState::Merged));
+        assert_eq!(stage_of(&view(&i, &board, None, None, None, &r)), Stage::Triage);
+        assert_eq!(stage_of(&view(&i, &board, None, Some(&iv), None, &inv(InvStatus::Running))), Stage::Investigate);
+        assert_eq!(stage_of(&view(&i, &board, None, None, None, &inv(InvStatus::Failed))), Stage::Investigate);
+        assert_eq!(stage_of(&view(&i, &board, None, None, None, &inv(InvStatus::PlanReady))), Stage::Plan);
+        assert_eq!(stage_of(&view(&i, &board, None, None, None, &inv(InvStatus::Approved))), Stage::Implement);
+        assert_eq!(stage_of(&view(&i, &board, Some(&s), None, None, &r)), Stage::Implement);
+        assert_eq!(stage_of(&view(&i, &board, Some(&s), None, Some(&open), &r)), Stage::Review);
+        assert_eq!(stage_of(&view(&i, &board, None, None, Some(&merged), &r)), Stage::Merged);
+        assert_eq!(role_of(&view(&i, &board, Some(&s), Some(&iv), None, &r)), Some(Role::Coder));
+        assert_eq!(role_of(&view(&i, &board, None, Some(&iv), None, &r)), Some(Role::Investigator));
+        assert_eq!(role_of(&view(&i, &board, None, None, None, &r)), None);
+    }
+
+    #[test]
+    fn summary_is_first_paragraph_capped() {
+        assert_eq!(summary_of("\n\nFirst para\nstill first.\n\nSecond"), "First para\nstill first.");
+        assert_eq!(summary_of(""), "");
+        let long = "x".repeat(300);
+        let s = summary_of(&long);
+        assert_eq!((s.chars().count(), s.ends_with('…')), (280, true));
     }
 }
