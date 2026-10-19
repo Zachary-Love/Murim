@@ -14,6 +14,7 @@ mod term_theme;
 mod meditations;
 mod automations;
 mod judge;
+mod pavilion;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
