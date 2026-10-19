@@ -25,9 +25,9 @@ function Meta({ c }: { c: Card }) {
   const prio = prioLabel(c.priority);
   return (
     <div className="pv-ident">
-      {c.ident && <span className="pv-id">{c.ident}</span>}
+      {c.ident && c.source !== "review" && <span className="pv-id">{c.ident}</span>}
       {c.pr && <span className="pv-prn"><PrIcon color={SEV[c.pr.overall] ?? "grey"} title={`${OVERALL[c.pr.overall] ?? c.pr.overall} #${c.pr.number}`} />#{c.pr.number}</span>}
-      {c.repo && (c.ident || c.pr) && <span className="pv-sep">·</span>}
+      {c.repo && ((c.ident && c.source !== "review") || c.pr) && <span className="pv-sep">·</span>}
       {c.repo && <span className="pv-repo">{c.repo}</span>}
       {prio && <span className="pv-prio">{prio}</span>}
     </div>
@@ -53,6 +53,12 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
     mq.addEventListener("change", on);
     return () => mq.removeEventListener("change", on);
   }, []);
+  useEffect(() => {
+    if (!drawer) return;
+    const on = (e: globalThis.KeyboardEvent) => { if (e.key === "Escape") setDrawer(false); };
+    window.addEventListener("keydown", on);
+    return () => window.removeEventListener("keydown", on);
+  }, [drawer]);
   useEffect(() => {
     const on = (e: globalThis.KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -134,7 +140,7 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
 
         <div className="pv-stats">
           {cards.map(([label, chip, n, sub, color], i) => (
-            <div key={label} className={`pv-stat ${filters.chip === chip ? "on" : ""}`} role="button" tabIndex={0} onClick={() => set({ chip })} onKeyDown={activate(() => set({ chip }))}>
+            <div key={label} className={`pv-stat ${chip !== "all" && filters.chip === chip ? "on" : ""} ${chip === "needsYou" && st.needsYou > 0 ? "hot" : ""}`} role="button" tabIndex={0} onClick={() => set({ chip })} onKeyDown={activate(() => set({ chip }))}>
               <div className="pv-slabel">{icons[i]}{label}</div>
               <div className="pv-num" style={{ color }}>{n}</div>
               <div className="pv-ssub">{sub}</div>
@@ -147,22 +153,22 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
             <div className="pv-qhead">
               <h2>{mode === "list" ? "Work queue" : "Work by state"} <span className="count">{board.cards.length}</span></h2>
               <div className="pv-seg">
-                {(["list", "board"] as Mode[]).map((m) => <button key={m} className={mode === m ? "on" : ""} onClick={() => setView(m)}>{m === "list" ? "List" : "Board"}</button>)}
+                {(["list", "board"] as Mode[]).map((m) => <button key={m} aria-pressed={mode === m} className={mode === m ? "on" : ""} onClick={() => setView(m)}>{m === "list" ? "List" : "Board"}</button>)}
               </div>
             </div>
             <div className="pv-chips">
-              {CHIPS.map(([k, label]) => <button key={k} className={`chip ${filters.chip === k ? "on" : ""}`} onClick={() => set({ chip: k })}>{label} <span className="count">{counts[k]}</span></button>)}
+              {CHIPS.map(([k, label]) => <button key={k} aria-pressed={filters.chip === k} className={`chip ${filters.chip === k ? "on" : ""}`} onClick={() => set({ chip: k })}>{label} <span className="count">{counts[k]}</span></button>)}
             </div>
             <div className="pv-filters">
               <div className="pv-search">
-                <input ref={search} value={filters.q} placeholder="Search issues, PRs, repos…" onChange={(e) => set({ q: e.target.value })} onKeyDown={(e) => { if (e.key === "Escape") e.currentTarget.blur(); }} />
+                <input ref={search} aria-label="Search" value={filters.q} placeholder="Search issues, PRs, repos…" onChange={(e) => set({ q: e.target.value })} onKeyDown={(e) => { if (e.key === "Escape") e.currentTarget.blur(); }} />
                 <kbd>/</kbd>
               </div>
-              <select value={filters.source} onChange={(e) => set({ source: e.target.value as Filters["source"] })}>
+              <select aria-label="Source" value={filters.source} onChange={(e) => set({ source: e.target.value as Filters["source"] })}>
                 <option value="all">All sources</option>
                 {Object.entries(SOURCE_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
-              <select value={filters.repo} onChange={(e) => set({ repo: e.target.value })}>
+              <select aria-label="Repository" value={filters.repo} onChange={(e) => set({ repo: e.target.value })}>
                 <option value="all">All repositories</option>
                 {repos.map((r) => <option key={r} value={r}>{r}</option>)}
               </select>
@@ -198,7 +204,7 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
       {narrow && drawer && inspector && (
         <>
           <div className="pv-backdrop" onClick={() => setDrawer(false)} />
-          <div className="pv-drawer">{inspector}</div>
+          <div className="pv-drawer" role="dialog" aria-modal="true" aria-label="Inspector">{inspector}</div>
         </>
       )}
     </div>
