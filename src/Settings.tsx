@@ -143,7 +143,7 @@ export default function Settings({ tab }: { tab: Section }) {
         </select>
       </label>
       <p className="muted">Claude (Haiku) checks the local model before Pavilion starts an investigation or marks an issue blocked.
-        Investigations only read code; coding starts when you approve the plan.</p>
+        Investigations can't edit files and ask before running commands; coding starts when you approve the plan.</p>
         </>;
       })()}
       {tab === "Prompts" && (

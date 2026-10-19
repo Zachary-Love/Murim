@@ -20,7 +20,7 @@ list, puts Claude Code to work on a task with one button, and babysits the PR to
 | **Reviews** | Other people's open PRs: those requesting your review plus your Linear teams' in-progress issues with a linked PR. Filter by author, status and repo like in Linear; the author is the assignee of the linked Linear issue (or of the issue named in the branch, e.g. `eng-123-fix`), else "Unlinked". Filters are remembered. **Review with agent** checks the PR out in `~/.murim/reviews/<repo>/<n>` and has your agent draft a review; you edit the summary, verdict and line comments, and nothing is posted to GitHub until you click Post. |
 | **Meditations** | Free-form agent sessions in your repos folder for questions and plans not tied to an issue ("how does X work?", "plan Y across my stack"). The agent saves anything worth keeping as markdown artifacts (default `~/.murim/meditations`), which Murim lists, searches and renders. |
 | **Automations** | Scheduled agent runs: a prompt, a folder and a schedule (daily, weekdays, weekly, every 2 weeks from a start date, or monthly). When a run waits on you (e.g. Claude asks before sending an email) you get a "&lt;name&gt; needs you" notification and a dot on the rail. Runs need Murim open and the Mac awake; a run missed within 24h runs once on launch or wake. |
-| **Menu bar** | A menu bar icon lists what needs you: drafts to review, Tempering escalations and automation runs waiting on you. Click one to jump to it. |
+| **Menu bar** | A menu bar icon lists what needs you: drafts to review, plans to approve, Tempering escalations and automation runs waiting on you. Click one to jump to it. |
 | **Appearance** | System, Light, Dark or a Custom theme (pick a base colour, e.g. beige, plus contrast), accent colour, optional texture (grain, paper, dots, lines), and separate interface and terminal fonts. The terminal always uses your iTerm profile's colours and iTerm's macOS key bindings (Cmd+←/→, Cmd+Backspace, Option+←/→, Shift+Enter). |
 | **Updates** | Murim checks for new releases and updates itself in place (signed updates). |
 | **Caffeine** | Keeps the Mac awake while flows run. |
@@ -90,7 +90,7 @@ Design notes for each feature live in [docs/specs](docs/specs).
   prefer **Ask permissions** for reviews. It is told not to post, and Murim only posts the draft when you click.
 - **Replies as you:** with Tempering replies on, Claude's replies to review comments are posted under your
   GitHub account. Set Review replies to Off in Settings to disable.
-- **Investigations read untrusted issue text.** They run in your repos folder with file edits disabled and your default permission mode; the plan they write is only acted on after you approve it.
+- **Investigations read untrusted issue text.** They run in your repos folder with file edits disabled and always ask before running commands; the plan they write is only acted on after you approve it.
 
 ## Releasing
 

@@ -164,12 +164,12 @@ pub fn decide(v: &IssueView) -> Decision {
     if let Some(s) = v.inv.filter(|s| s.status == Status::NeedsInput) {
         return d(Column::NeedsYou, format!("investigation {}", asks(s)));
     }
-    match v.rec.investigation.as_ref().map(|i| i.status) {
+    match v.rec.investigation.as_ref().filter(|_| v.session.is_none()).map(|i| i.status) {
         Some(InvStatus::PlanReady) => return Decision { action: Some(Action::ApprovePlan), ..d(Column::NeedsYou, "plan ready") },
         Some(InvStatus::Failed) => return d(Column::NeedsYou, "investigation ended without a plan"),
         Some(InvStatus::Running) if v.inv.map_or(true, |s| s.status == Status::Ended) => return d(Column::NeedsYou, "investigation ended without a plan"),
         Some(InvStatus::Running) => return d(Column::Working, "investigating"),
-        Some(InvStatus::Approved) if v.session.is_none() => return d(Column::Working, "starting agent"),
+        Some(InvStatus::Approved) => return d(Column::Working, "starting agent"),
         _ => {}
     }
     if live(v.session) {
@@ -337,8 +337,12 @@ pub fn poke(app: &AppHandle) {
     }
 }
 
+/// Load the store before hooks start, so an early hook can't save a default one over it.
+pub fn load(app: &AppHandle) {
+    pv(app).data.lock().unwrap().store = load_store();
+}
+
 pub fn start(app: AppHandle) {
-    pv(&app).data.lock().unwrap().store = load_store();
     std::thread::spawn(move || loop {
         reconcile(&app);
         let (m, cv) = &app.state::<Pavilion>().wake;
@@ -402,7 +406,7 @@ fn reconcile(app: &AppHandle) {
         }
         cards.sort_by(|a, b| (a.column, a.priority == 0, a.priority, &a.ident).cmp(&(b.column, b.priority == 0, b.priority, &b.ident)));
         let (working, max) = (working(&map), cfg.pavilion.max_agents as usize);
-        let auto = !g.store.paused && cfg.pavilion.auto_investigate && cfg.agent == AgentKind::Claude;
+        let auto = !g.store.paused && cfg.pavilion.auto_investigate && !cfg.repos_root.is_empty() && cfg.agent == AgentKind::Claude;
         let start: Vec<String> = if auto { to_start(&cards, working, max).iter().map(|c| c.key.clone()).collect() } else { vec![] };
         let mut board = Board { cards, working, max, paused: g.store.paused, local_offline: g.offline, updated: g.board.updated, error: inbox.error.clone() };
         let changed = board != g.board;
@@ -436,11 +440,14 @@ fn start_investigation(app: &AppHandle, issue_id: &str) -> Result<(), String> {
     if cfg.repos_root.is_empty() {
         return Err("Choose your repos folder in Settings".into());
     }
+    if sessions::pty_alive(app, &inv_id(issue_id)) {
+        return Ok(());
+    }
     let repos: Vec<String> = crate::repo_match::list_repos(Path::new(&cfg.repos_root)).into_iter().map(|r| r.name).collect();
     let guess = it.repo.as_ref().map(|r| repo_name(&r.path));
     set_investigation(app, issue_id, InvStatus::Running, String::new());
     let r = sessions::start_investigation_session(app, &inv_id(issue_id), format!("Investigate {}", it.issue.identifier), &cfg.repos_root, investigation_prompt(&it.issue, &repos, guess.as_deref()));
-    if r.is_err() {
+    if r.is_err() && !sessions::pty_alive(app, &inv_id(issue_id)) {
         set_investigation(app, issue_id, InvStatus::Failed, String::new());
     }
     r
@@ -498,6 +505,10 @@ fn spawn_judge(app: &AppHandle, issue: Issue, ask: Vec<Q>, board: Vec<(String, S
 /// Investigation Stop (sessions::on_hook): record the repo and the plan. No valid marker = it asked the user; nothing to do.
 pub fn investigation_done(app: &AppHandle, session_id: &str, last: &str) {
     let Some(issue_id) = session_id.strip_prefix("investigation:") else { return };
+    // a late Stop after approve must not flip the record back to PlanReady
+    if approved_plan(app, issue_id).is_some() {
+        return;
+    }
     let root = settings::dir(app).map(|d| settings::load(&d).repos_root).unwrap_or_default();
     let Some((status, plan, repo)) = investigation_outcome(last, Path::new(&root)) else { return };
     // a manual pick, so Approve starts straight in the repo's worktree
@@ -531,6 +542,9 @@ pub fn pavilion_approve(app: AppHandle, issue_id: String, plan: String) -> Resul
     let plan = plan.trim().to_string();
     if plan.is_empty() {
         return Err("The plan is empty".into());
+    }
+    if sessions::pty_alive(&app, &issue_id) {
+        return Ok(());
     }
     set_investigation(&app, &issue_id, InvStatus::Approved, plan.clone());
     let mode = settings::load(&settings::dir(&app)?).default_permission_mode;
@@ -649,6 +663,18 @@ mod tests {
         assert_eq!(col(&run(&i, None, Some(&sess("investigation:1", "needsInput")), None, &inv(InvStatus::Running))), (Column::NeedsYou, "investigation asks: reply needed"));
         // approved, coding session not started yet: never re-queued
         assert_eq!(col(&run(&i, None, None, None, &inv(InvStatus::Approved))), (Column::Working, "starting agent"));
+    }
+
+    #[test]
+    fn leftover_investigation_record_yields_to_a_coding_session() {
+        let i = issue("1");
+        for st in [InvStatus::Failed, InvStatus::PlanReady, InvStatus::Running] {
+            let ended = sess("investigation:1", "ended");
+            let d = run(&i, Some(&sess("1", "working")), Some(&ended), None, &inv(st));
+            assert_eq!((col(&d), d.action), ((Column::Working, "agent working"), None));
+            let d = run(&i, Some(&sess("1", "idle")), Some(&ended), None, &inv(st));
+            assert_eq!((col(&d), d.action), ((Column::Watching, "idle"), None));
+        }
     }
 
     #[test]

@@ -334,7 +334,7 @@ pub fn claude_print(prompt: &str, timeout: Duration) -> Option<String> {
     use std::process::Stdio;
     let (vars, path) = shell_env();
     let mut cmd = Command::new(path.as_deref().unwrap_or("claude"));
-    cmd.args(["-p", "--model", "haiku", prompt]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.args(["-p", "--model", "haiku", prompt, "--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     for (k, _) in std::env::vars() {
         if k.starts_with("CLAUDE") || k.starts_with("AI_AGENT") {
             cmd.env_remove(k);
@@ -815,7 +815,7 @@ fn start_agent(app: &AppHandle, id: &str, wt: &str, name: String, head: Vec<Stri
         if g.ptys.contains_key(id) {
             return Err("already running".to_string());
         }
-        g.map.insert(id.into(), SessionInfo { issue_id: id.into(), worktree: wt.into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode: cfg.default_permission_mode, tempering: false, escalations: vec![], memory: Default::default(), pr_flow: PrFlow::None, agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), name, tempering_turn: false });
+        g.map.insert(id.into(), SessionInfo { issue_id: id.into(), worktree: wt.into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode: if is_investigation(id) { PermissionMode::Normal } else { cfg.default_permission_mode }, tempering: false, escalations: vec![], memory: Default::default(), pr_flow: PrFlow::None, agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), name, tempering_turn: false });
         Ok(())
     })?;
     spawn(app, id, head)

@@ -31,7 +31,7 @@ pub struct Issue {
 
 // Linear's schema: WorkflowState.type is one of triage, backlog, unstarted, started,
 // completed, canceled, duplicate. Duplicates are the native "duplicate" state type.
-const QUERY: &str = r#"query($after: String) { viewer { assignedIssues(first: 100, after: $after, filter: { cycle: { isActive: { eq: true } }, state: { type: { nin: ["completed", "canceled", "duplicate"] } } }) { pageInfo { hasNextPage endCursor } nodes { id identifier title description url branchName priority updatedAt state { name type } labels { nodes { name } } team { key } inverseRelations { nodes { type issue { id identifier state { type } } } } } } } }"#;
+const QUERY: &str = r#"query($after: String) { viewer { assignedIssues(first: 100, after: $after, filter: { cycle: { isActive: { eq: true } }, state: { type: { nin: ["completed", "canceled", "duplicate"] } } }) { pageInfo { hasNextPage endCursor } nodes { id identifier title description url branchName priority updatedAt state { name type } labels(first: 10) { nodes { name } } team { key } inverseRelations(first: 10) { nodes { type issue { id identifier state { type } } } } } } } }"#;
 
 fn post(api_key: &str, body: Value) -> Result<Value, String> {
     // ureq returns Err on non-2xx; Linear sends GraphQL errors (e.g. RATELIMITED) with 400, so read them.

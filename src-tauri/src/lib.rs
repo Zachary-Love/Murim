@@ -44,6 +44,7 @@ pub fn run() {
                 caffeine::set(&app.state::<caffeine::Caffeine>(), true)?;
             }
             sessions::load(app.handle());
+            pavilion::load(app.handle());
             app.manage(hooks::start(app.handle().clone())?);
             inbox::start(app.handle().clone());
             github::start(app.handle().clone());
