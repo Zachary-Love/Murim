@@ -1,6 +1,7 @@
 # Pavilion — design
 
-Status: approved in chat 2026-10-19.
+Status: approved in chat 2026-10-19; amended while planning (columns recomputed each run, read-only investigation
+instead of a plan permission mode, tray adds a section).
 
 ## Goal
 
@@ -37,40 +38,38 @@ Items:
 
 ## Store
 
-`~/.murim/pavilion.json`, written atomically (temp file + rename) on every change:
+`~/.murim/pavilion.json`, written atomically (temp file + rename) on every change. Keyed by Linear issue id:
 
 ```
-{ items: { <key>: {
-    column, fingerprint,
-    blockedBy: [issueId],           // Linear relations
-    inferredBlockers: [{ issueId, reason }],
-    dismissedBlockers: [issueId],
-    verdicts: { ready?: Verdict, hiddenBlocker?: Verdict },
-    investigation?: { sessionId, plan, status: running | planReady | failed | approved },
-    updatedAt } },
+{ items: { <issueId>: {
+    ready?: Verdict, blocker?: Verdict,        // judgement answers, each with the fingerprint it was made for
+    dismissed: [identifier],                   // inferred blockers the user dismissed
+    investigation?: { status: running | planReady | failed | approved, plan } } },
   paused: bool }
 
 Verdict { answer, reason, confidence, by: "local" | "claude", fingerprint }
 ```
 
 Sessions, Tempering memory and escalations stay in `sessions.json` (source of truth). Pavilion reads them and does
-not copy them; its store holds only what exists nowhere else.
+not copy them; its store holds only what exists nowhere else. Records of issues that left the board are pruned after
+a successful, non-empty inbox poll.
 
 ## Reconcile
 
-`pavilion::reconcile(app)` runs after each inbox poll (60s), PR health poll (60s), reviews poll (120s), and on
-hook events (session status changes). For each item:
+A Pavilion thread runs `reconcile` every 60s and whenever poked: after each inbox, PR health and reviews poll, and on
+every sessions update (hook events). Each run:
 
-1. **Fingerprint:** a hash of data already fetched: issue `updatedAt`, description hash, blocker ids and their
-   states, PR head sha, check states, latest comment id, session status, PR flow. `updatedAt` is added to the
-   Linear issue query.
-2. Unchanged fingerprint → keep stored column, skip.
-3. Changed → `decide(item, stored) -> (Column, Option<Question>)`. Pure, unit tested like `tempering::decide`.
-4. A question with no verdict for the current fingerprint → judgement (below), run on a worker thread; the item keeps
-   its previous column until the verdict lands, then reconciles again.
-5. Emit `pavilion-updated` with the full board.
+1. Builds every card with the pure rules `decide` (issues), `decide_review` and `decide_agent`. They are cheap and run
+   every time; nothing about columns is cached.
+2. **Fingerprint** (FNV-1a over issue `updatedAt`, title and description; `updatedAt` is added to the Linear query)
+   gates only the judgement questions: a verdict whose fingerprint matches is reused, so the LLM never re-answers an
+   unchanged issue.
+3. Issues missing a fresh verdict go to the judgement worker (one at a time); the card shows "checking…" in Watching
+   until it lands, then a poke reconciles again.
+4. Starts queued investigations into free slots (below).
+5. Emits `pavilion-updated` with the board when it changed.
 
-A failed poll keeps the last stored state; the header shows "updated <relative time>".
+A failed poll keeps the last data; the header shows when the board last changed.
 
 ## Blockers
 
@@ -107,14 +106,19 @@ next changed fingerprint or after 10 minutes, whichever comes first.
 - **Slots:** max agents (default 3) counts every live session: coding, investigation, Tempering, review, automation
   and meditation. Tempering resumes of existing sessions never wait for a slot.
 - **Queue order:** Linear priority (urgent first, no priority last), then oldest `updatedAt`.
-- **Investigation** (when Auto-investigate is on and Pavilion is not paused): a new session kind with id prefix `inv:`
-  (like the meditation/automation prefixes) in the repos folder, no PR flow, run with `--permission-mode plan` (a new `PermissionMode::Plan` variant used only by
-  investigations, not offered in Settings). Its prompt has
-  the issue, the matched repo (or Murim's guess) and asks for a short implementation plan as the final message. On
-  Stop the last message is stored as `investigation.plan`, status `planReady` → Needs you. A session that ends
-  with an empty last message → `failed` → Needs you ("investigation ended without a plan").
-- **Approve plan:** calls the existing `start_task` with the (possibly edited) plan appended as extra instructions;
-  the investigation session is forgotten; status `approved`.
+- **Investigation** (when Auto-investigate is on, Pavilion is not paused and the agent is Claude Code): a session
+  keyed `investigation:<issueId>` (like the meditation/automation prefixes) in the repos folder, no PR flow. It is
+  read-only the same way as the repo-pick session: hooks via `--settings`, `Edit,Write,NotebookEdit` disallowed, the
+  user's default permission mode. Its prompt has the issue, the repo list and Murim's repo guess, and asks for the
+  plan as the final message ending with `MURIM_REPO: <repo>`.
+  - Stop with a valid `MURIM_REPO` line: the repo is recorded (as a manual pick, so coding starts in its worktree),
+    the plan (marker removed) is stored, status `planReady` → Needs you, plus a notification. An empty plan → `failed`.
+  - Stop without a valid marker: the agent is asking something; the session is marked Needs input → Needs you, and
+    the card opens the investigation terminal.
+  - Session ended (crash, app restart) while `running` → Needs you "investigation ended without a plan".
+- **Approve plan:** stores the (possibly edited) plan with status `approved`, then calls the existing `start_task`.
+  `start_task` appends an approved plan to the issue text, so it also survives the repo-pick path. The investigation
+  session is forgotten. Approved with no session yet shows Working "starting agent" (never re-queued).
 - **Pause:** stops new investigations and queue starts; Tempering and running sessions continue.
 
 ## UI
@@ -131,7 +135,7 @@ next changed fingerprint or after 10 minutes, whichever comes first.
   `dismissedBlockers`); **Start now** on Queued (may exceed the agent limit).
 - **Click:** navigates to the existing pane through the existing `navigate` event (Tasks, Reviews, Automations,
   Meditations). Edit opens the plan (`Markdown.tsx` preview + textarea) with Approve.
-- **Menu bar:** the tray list is built from Pavilion's Needs you items (one source).
+- **Menu bar:** the tray keeps its sections and adds **Plans to approve**; clicking one opens Pavilion.
 
 ## Settings
 
