@@ -361,7 +361,7 @@ button.chip:hover { background: var(--hover); border-color: var(--line-hi); colo
 .pvi-tabs button.on { color: var(--text); font-weight: 600; border-bottom-color: var(--brand); }
 .pvi-sec { padding: 16px 20px; border-top: 1px solid var(--line); margin: 0; }
 .pvi-tabs + .pvi-sec { border-top: 0; }
-.pvi-sec p { margin: 0; }
+.pvi-sec p:not(.pvi-text) { margin: 0; }
 .pvi-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
 .pvi-row .pvi-cap { color: var(--text-2); }
 .pvi-text { font-size: 12px; line-height: 1.55; color: var(--text-2); margin: 0 0 10px; }
@@ -390,7 +390,7 @@ button.chip:hover { background: var(--hover); border-color: var(--line-hi); colo
 .pvi-checks li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--text); }
 .pvi-checks li:last-child { border-bottom: 0; }
 .pvi-st { font-size: 11px; color: var(--muted); }
-.pvi-st.red { color: var(--red); } .pvi-st.amber { color: var(--amber); } .pvi-st.green { color: var(--green); } .pvi-st.blue { color: var(--blue); }
+.pvi-st.red { color: var(--red); } .pvi-st.amber { color: var(--amber); } .pvi-st.green { color: var(--green); }
 .pvi-plan { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
 .pvi-plan .pvi-btns { justify-content: flex-end; }
 .pvi-plan textarea { width: 100%; flex: 1; min-height: 320px; }

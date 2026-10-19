@@ -24,6 +24,7 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
   const c = card, pr = c.pr, st = pill(c), step = stepOf(c.stage);
   const hasTerm = !!(c.session && sessions[c.session]);
   const tabs = TABS.filter(([k]) => k === "overview" || (k === "plan" ? !!c.plan : k === "terminal" ? hasTerm : log.length > 0));
+  const cur = tabs.some(([k]) => k === tab) ? tab : "overview";
   const view = VIEW_LABEL[c.view] ?? c.view;
   const exec = async (cmd: string, args: Record<string, unknown>) => { setBusy(true); try { await run(cmd, args); } finally { setBusy(false); } };
   const approve = () => exec("pavilion_approve", { issueId: c.key, plan: text });
@@ -36,7 +37,7 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
     : c.action === "dismissBlocker" ? { label: "Dismiss blocker", go: dismiss, off: false } : null;
   const failing = pr?.failingChecks ?? [];
   const ci = pr?.ci;
-  const allPass = !!pr && !failing.length && (ci === "passing" || ci === "success" || pr.overall === "readyToMerge");
+  const allPass = !!pr && !failing.length && (ci === "passing" || pr.overall === "readyToMerge");
 
   return (
     <aside className="pvi">
@@ -50,23 +51,23 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
           <div className="pvi-ident">
             {c.source === "issue" && c.ident && <span>{c.ident}</span>}
             {pr && <span><PrIcon color={SEV[pr.overall] ?? "grey"} title={OVERALL[pr.overall] ?? pr.overall} /> #{pr.number}</span>}
-            {c.repo && <span >{c.repo}</span>}
+            {c.repo && <span>{c.repo}</span>}
           </div>
           <h2 className="pvi-title">{c.title}</h2>
           <span className={`chip ${TONE[st.tone]}`}>{st.label}</span>
           {c.summary && <p className="pvi-sum">{c.summary}</p>}
         </div>
         <div className="pvi-tabs" role="tablist">
-          {tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}</button>)}
+          {tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={cur === k} className={cur === k ? "on" : ""} onClick={() => setTab(k)}>{l}</button>)}
         </div>
 
-        {tab === "overview" && <>
+        {cur === "overview" && <>
           {c.stage && (
             <section className="pvi-sec">
               <div className="pvi-row"><span className="pvi-cap">Pipeline</span><span className="pvi-dim">{Math.round(step / 5 * 100)}% through</span></div>
               <ol className="pvi-steps">
                 {PIPELINE.map(([k, l], i) => (
-                  <li key={k} className={i < step ? "done" : i === step ? "now" : ""}>
+                  <li key={k} className={i < step ? "done" : i === step ? "now" : ""} aria-current={i === step ? "step" : undefined}>
                     <span className="pvi-dot">{i < step ? "✓" : i + 1}</span><span className="pvi-lbl">{l}</span>
                   </li>
                 ))}
@@ -128,16 +129,16 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
           )}
         </>}
 
-        {tab === "plan" && c.plan && (
+        {cur === "plan" && c.plan && (
           <section className="pvi-sec pvi-plan">
             <div className="pvi-btns"><button className="btn" onClick={() => setEdit(!edit)}>{edit ? "Preview" : "Edit"}</button></div>
             {edit ? <textarea value={text} onChange={(e) => setText(e.target.value)} aria-label="Plan" /> : <Markdown text={text} />}
           </section>
         )}
-        {tab === "terminal" && hasTerm && c.session && (
-          <div className="pvi-term"><SessionPane id={c.session} session={sessions[c.session]} title={`Investigate ${c.ident}`} noun="investigation" /></div>
+        {cur === "terminal" && hasTerm && c.session && (
+          <div className="pvi-term"><SessionPane id={c.session} session={sessions[c.session]} title={`Investigate ${c.ident || c.title}`} noun="investigation" /></div>
         )}
-        {tab === "activity" && (
+        {cur === "activity" && (
           <ul className="pvi-sec pvi-log">
             {[...log].reverse().map((e, i) => (
               <li key={i}><time>{new Date(e.at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</time><span>{e.message}</span></li>
