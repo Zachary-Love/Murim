@@ -316,6 +316,37 @@ pub fn shell_env() -> &'static (Vec<(String, String)>, Option<String>) {
     })
 }
 
+/// One-shot `claude -p --model haiku <prompt>` with the login-shell env. None on spawn failure, error exit or timeout.
+pub fn claude_print(prompt: &str, timeout: Duration) -> Option<String> {
+    use std::process::Stdio;
+    let (vars, path) = shell_env();
+    let mut cmd = Command::new(path.as_deref().unwrap_or("claude"));
+    cmd.args(["-p", "--model", "haiku", prompt]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    for (k, _) in std::env::vars() {
+        if k.starts_with("CLAUDE") || k.starts_with("AI_AGENT") {
+            cmd.env_remove(k);
+        }
+    }
+    cmd.envs(vars.iter().filter(|(k, _)| !(k.starts_with("CLAUDE") || k.starts_with("AI_AGENT"))).map(|(k, v)| (k, v)));
+    let mut child = cmd.spawn().map_err(|e| eprintln!("claude spawn failed: {e}")).ok()?;
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        match child.try_wait().ok()? {
+            Some(s) if s.success() => break,
+            Some(_) => return None,
+            None if std::time::Instant::now() > deadline => {
+                let _ = child.kill();
+                return None;
+            }
+            None => std::thread::sleep(Duration::from_millis(100)),
+        }
+    }
+    // ponytail: answers are a word or a small JSON object, so reading after exit can't fill the pipe.
+    let mut out = String::new();
+    std::io::Read::read_to_string(&mut child.stdout?, &mut out).ok()?;
+    Some(out)
+}
+
 /// Falls back to Murim's own env if the shell produced nothing usable.
 fn parse_shell_env(out: &str) -> (Vec<(String, String)>, Option<String>) {
     let claude = out.lines().find_map(|l| l.strip_prefix("MURIM_CLAUDE=")).map(str::trim).filter(|p| p.starts_with('/')).map(String::from);

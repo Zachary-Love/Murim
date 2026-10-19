@@ -128,8 +128,6 @@ fn by_semantic(labels: &[String], repos: &[Repo]) -> Option<RepoMatch> {
 }
 
 fn by_claude(labels: &[String], title: &str, repos: &[Repo]) -> Option<RepoMatch> {
-    use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
     if repos.is_empty() {
         return None;
     }
@@ -139,32 +137,7 @@ fn by_claude(labels: &[String], title: &str, repos: &[Repo]) -> Option<RepoMatch
         labels.join(", "),
         names.join(", ")
     );
-    // Finder-launched apps don't have the shell PATH: use the login shell's claude + env, like sessions do.
-    let (vars, path) = crate::sessions::shell_env();
-    let mut cmd = Command::new(path.as_deref().unwrap_or("claude"));
-    cmd.args(["-p", "--model", "haiku", &prompt]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
-    for (k, _) in std::env::vars() {
-        if k.starts_with("CLAUDE") || k.starts_with("AI_AGENT") {
-            cmd.env_remove(k);
-        }
-    }
-    cmd.envs(vars.iter().filter(|(k, _)| !(k.starts_with("CLAUDE") || k.starts_with("AI_AGENT"))).map(|(k, v)| (k, v)));
-    let mut child = cmd.spawn().map_err(|e| eprintln!("claude spawn failed: {e}")).ok()?;
-    let deadline = Instant::now() + Duration::from_secs(60);
-    loop {
-        match child.try_wait().ok()? {
-            Some(s) if s.success() => break,
-            Some(_) => return None,
-            None if Instant::now() > deadline => {
-                let _ = child.kill();
-                return None;
-            }
-            None => std::thread::sleep(Duration::from_millis(100)),
-        }
-    }
-    // ponytail: output is one word, so reading after exit can't fill the pipe.
-    let mut out = String::new();
-    std::io::Read::read_to_string(&mut child.stdout?, &mut out).ok()?;
+    let out = crate::sessions::claude_print(&prompt, std::time::Duration::from_secs(60))?;
     let ans = out.trim().trim_matches(|c| c == '`' || c == '"' || c == '.');
     let r = repos.iter().find(|r| r.name == ans)?;
     Some(RepoMatch { path: r.path.clone(), source: Source::Claude })
