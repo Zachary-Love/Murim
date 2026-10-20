@@ -74,6 +74,9 @@ pub struct Manual {
 pub struct Store {
     pub items: HashMap<String, Record>,
     pub paused: bool,
+    /// hand moves of review PR, adopted PR and automation cards (issue cards keep theirs in `items`).
+    /// ponytail: entries of cards that left the board linger until their signature goes stale; a few bytes each
+    pub moves: HashMap<String, Manual>,
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq, Debug)]
@@ -127,6 +130,17 @@ pub enum Pick {
     Queued,
     NeedsYou,
     Blocked,
+    // the orchestrator's plan for every other card
+    /// queued and taking a free slot now
+    Starting,
+    /// queued behind the agent limit
+    WaitingSlot,
+    /// queued but auto-start is off (paused, or a setting)
+    AutoOff,
+    Working,
+    Watching,
+    Done,
+    Moved,
 }
 
 #[derive(Serialize, Clone, Default, PartialEq, Debug)]
@@ -327,6 +341,32 @@ pub fn pick_of(dec: &Decision, inflight: bool, retrying: bool) -> Option<Pick> {
     }
 }
 
+/// The pill for every card but review PRs (those belong to someone else): the queue's plan beats the judgement it
+/// came from, a hand move beats the rest.
+pub fn plan_of(c: &Card, judged: Option<Pick>, auto_off: bool, starting: bool) -> Option<Pick> {
+    if c.source == Source::Review {
+        return judged;
+    }
+    Some(match c.column {
+        Column::Queued => if starting { Pick::Starting } else if auto_off { Pick::AutoOff } else { Pick::WaitingSlot },
+        _ if c.manual => Pick::Moved,
+        _ if judged.is_some() => return judged,
+        Column::Working => Pick::Working,
+        Column::NeedsYou => Pick::NeedsYou,
+        Column::Blocked => Pick::Blocked,
+        Column::Watching => Pick::Watching,
+        Column::Done => Pick::Done,
+    })
+}
+
+/// Log a line once per app run (repeated failures and holds that every poll would otherwise re-log).
+pub fn olog_once(msg: String) {
+    static SEEN: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+    if SEEN.lock().unwrap().get_or_insert_with(HashSet::new).insert(msg.clone()) {
+        olog(msg);
+    }
+}
+
 /// Someone else's PR. Pavilion never starts review agents; it only shows them.
 pub fn decide_review(s: Option<&SessionInfo>, draft: bool, requested: bool) -> Decision {
     match s {
@@ -355,7 +395,7 @@ pub fn working(map: &HashMap<String, SessionInfo>) -> usize {
 
 /// Queued cards to start now: free slots, urgent first (Linear 1 urgent … 4 low, 0 none last), then oldest update.
 pub fn to_start(cards: &[Card], working: usize, max: usize) -> Vec<&Card> {
-    let mut q: Vec<&Card> = cards.iter().filter(|c| c.column == Column::Queued).collect();
+    let mut q: Vec<&Card> = cards.iter().filter(|c| c.column == Column::Queued && c.source == Source::Issue).collect();
     q.sort_by_key(|c| (if c.priority == 0 { 9 } else { c.priority }, c.updated_at.clone()));
     q.truncate(max.saturating_sub(working));
     q
@@ -424,6 +464,8 @@ struct Inner {
     summary: String,
     /// unix secs of the next scheduled tick (pokes run sooner without moving it)
     next_run: u64,
+    /// issue id -> "Column: reason" last logged
+    logged: HashMap<String, String>,
 }
 
 #[derive(Default)]
@@ -591,8 +633,8 @@ fn heal(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         let cfg = settings::dir(&app).map(|d| settings::load(&d).pavilion).unwrap_or_default();
-        if judge::test_model(&cfg.ollama_url, &cfg.model).is_ok() {
-            olog(format!("{} answers again", cfg.model));
+        if !cfg.local_model || judge::test_model(&cfg.ollama_url, &cfg.model).is_ok() {
+            olog(format!("{} answers again", judge::model_name(&cfg)));
             pv(&app).data.lock().unwrap().offline = false;
             poke(&app);
         }
@@ -654,6 +696,14 @@ fn reconcile(app: &AppHandle) {
                 pick, manual, auto: sig,
             });
         }
+        // one log line per issue whenever its column or reason changes: why nothing starts is in the log
+        for c in cards.iter().filter(|c| c.source == Source::Issue) {
+            let line = format!("{:?}: {}", c.column, c.reason);
+            if g.logged.get(&c.key) != Some(&line) {
+                olog(format!("  {} {line}{}", c.ident, c.by.map_or(String::new(), |b| format!(" (decided by {b:?})"))));
+                g.logged.insert(c.key.clone(), line);
+            }
+        }
         for id in stale.drain(..) {
             if let Some(r) = g.store.items.get_mut(&id) {
                 olog(format!("manual move on {id} ended: Pavilion's decision changed"));
@@ -681,16 +731,33 @@ fn reconcile(app: &AppHandle) {
             let Some(dec) = decide_agent(s) else { continue };
             cards.push(Card { key: id.clone(), column: dec.column, title: s.name.clone(), reason: dec.reason, view: "automations".into(), target: id.clone(), session: Some(id.clone()), source: Source::Agent, role: Some(Role::Automation), ..Default::default() });
         }
+        // hand moves on the other cards: same rule as issues, kept while the automatic decision is unchanged
+        let mut stale_moves = vec![];
+        for c in cards.iter_mut().filter(|c| c.source != Source::Issue) {
+            c.auto = format!("{:?}: {}", c.column, c.reason); // == signature() of the decision that built it
+            match g.store.moves.get(&c.key) {
+                Some(m) if m.from == c.auto => (c.column, c.reason, c.manual) = (m.column, format!("moved by you · was {}", c.reason), true),
+                Some(_) => stale_moves.push(c.key.clone()),
+                None => {}
+            }
+        }
+        if !stale_moves.is_empty() {
+            stale_moves.iter().for_each(|k| drop(g.store.moves.remove(k)));
+            save(&g.store);
+        }
         cards.sort_by(|a, b| (a.column, a.priority == 0, a.priority, &a.ident).cmp(&(b.column, b.priority == 0, b.priority, &b.ident)));
         let (working, max) = (working(&map), cfg.pavilion.max_agents as usize);
         let off = auto_off(g.store.paused, &cfg);
         let start: Vec<String> = if off.is_none() { to_start(&cards, working, max).iter().map(|c| c.key.clone()).collect() } else { vec![] };
+        for c in cards.iter_mut() {
+            c.pick = plan_of(c, c.pick, off.is_some(), start.contains(&c.key));
+        }
         let n = |c: Column| cards.iter().filter(|x| x.source == Source::Issue && x.column == c).count();
         let summary = match &inbox.error {
             Some(e) => format!("Linear error: {e}"),
             None => format!(
                 "board: {} cycle issues ({} need judging, {} queued, {} blocked, {} need you, {} working); agents {working}/{max}; model {}{}; auto-start {}",
-                inbox.items.len(), asks.len(), n(Column::Queued), n(Column::Blocked), n(Column::NeedsYou), n(Column::Working), cfg.pavilion.model,
+                inbox.items.len(), asks.len(), n(Column::Queued), n(Column::Blocked), n(Column::NeedsYou), n(Column::Working), judge::model_name(&cfg.pavilion),
                 if g.offline { " (offline)" } else { "" }, off.map_or("on".into(), |o| format!("off: {o}")),
             ),
         };
@@ -699,7 +766,7 @@ fn reconcile(app: &AppHandle) {
             g.summary = summary;
         }
         let (thinking, judging) = (g.thinking.clone(), g.inflight.len());
-        let mut board = Board { cards, working, max, paused: g.store.paused, local_offline: g.offline, updated: g.board.updated, error: inbox.error.clone(), model: cfg.pavilion.model.clone(), thinking, judging, next_run: g.board.next_run };
+        let mut board = Board { cards, working, max, paused: g.store.paused, local_offline: g.offline && cfg.pavilion.local_model, updated: g.board.updated, error: inbox.error.clone(), model: judge::model_name(&cfg.pavilion), thinking, judging, next_run: g.board.next_run };
         let changed = board != g.board;
         // `updated` only moves on a real change, not when the countdown rolls over
         board.next_run = g.next_run;
@@ -768,7 +835,7 @@ fn spawn_judge(app: &AppHandle, issue: Issue, ask: Vec<Q>, board: Vec<(String, S
         let comments = crate::linear::api_key().and_then(|k| crate::linear::recent_comments(&k, &issue.id, 10)).unwrap_or_default();
         let text = issue_text(&issue, &comments);
         let ids: Vec<String> = board.iter().map(|b| b.0.clone()).collect();
-        olog(format!("judging {} ({:?}) with {}", issue.identifier, ask, cfg.model));
+        olog(format!("judging {} ({:?}) with {}", issue.identifier, ask, judge::model_name(&cfg)));
         let claude = |p: &str| sessions::claude_print(p, Duration::from_secs(90));
         let (mut out, mut local_ok, mut failed) = (vec![], true, false);
         for q in ask {
@@ -891,15 +958,24 @@ pub fn pavilion_approve(app: AppHandle, issue_id: String, plan: String) -> Resul
     Ok(())
 }
 
-/// Move an issue card by hand; None = back to automatic.
+/// Move any card by hand; None = back to automatic. Only issues can be queued (the queue starts investigations).
 #[tauri::command]
-pub fn pavilion_move(app: AppHandle, issue_id: String, column: Option<Column>) -> Result<(), String> {
-    let c = card(&app, &issue_id).ok_or("That card is no longer on the board")?;
-    let from = c.auto.clone();
+pub fn pavilion_move(app: AppHandle, key: String, column: Option<Column>) -> Result<(), String> {
+    let c = card(&app, &key).ok_or("That card is no longer on the board")?;
+    if column == Some(Column::Queued) && c.source != Source::Issue {
+        return Err("Only Linear issues can be queued".into());
+    }
     if let Some(col) = column {
         learn(&app, format!("The user moved {} \"{}\" by hand to {col:?}; Pavilion had decided {}", c.ident, c.title, c.auto));
     }
-    with_store(&app, |s| s.items.entry(issue_id).or_default().manual = column.map(|column| Manual { column, from }));
+    let m = column.map(|column| Manual { column, from: c.auto.clone() });
+    with_store(&app, |s| match c.source {
+        Source::Issue => s.items.entry(key).or_default().manual = m,
+        _ => drop(match m {
+            Some(m) => s.moves.insert(key, m),
+            None => s.moves.remove(&key),
+        }),
+    });
     Ok(())
 }
 
@@ -1127,6 +1203,18 @@ mod tests {
         assert_eq!(manual_decision(&d(Column::Working, "fixing CI: build"), Some(&m)), None); // new situation: automatic again
         assert_eq!(manual_decision(&auto, None), None);
         assert_eq!(manual_decision(&auto, Some(&Manual { column: Column::Queued, ..m })).unwrap().action, Some(Action::StartNow));
+    }
+
+    #[test]
+    fn every_card_gets_a_plan() {
+        let c = |column, source| Card { column, source, ..Default::default() };
+        assert_eq!(plan_of(&c(Column::Queued, Source::Issue), Some(Pick::Queued), false, true), Some(Pick::Starting));
+        assert_eq!(plan_of(&c(Column::Queued, Source::Issue), Some(Pick::Queued), false, false), Some(Pick::WaitingSlot));
+        assert_eq!(plan_of(&c(Column::Queued, Source::Issue), None, true, false), Some(Pick::AutoOff));
+        assert_eq!(plan_of(&c(Column::Watching, Source::Issue), Some(Pick::Thinking), false, false), Some(Pick::Thinking));
+        assert_eq!(plan_of(&c(Column::Watching, Source::Agent), None, false, false), Some(Pick::Watching));
+        assert_eq!(plan_of(&Card { manual: true, ..c(Column::Done, Source::Issue) }, None, false, false), Some(Pick::Moved));
+        assert_eq!(plan_of(&c(Column::Watching, Source::Review), None, false, false), None);
     }
 
     #[test]

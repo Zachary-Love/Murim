@@ -7,7 +7,7 @@ import Caffeine from "./Caffeine";
 import Updater from "./Updater";
 import { Item, Repo, Session, Mode, AgentKind, LogEntry, PrMap, SEV, OVERALL, ReviewPr, MedSel, Automation, AutoSel, Board, isAuto, sortItems, stage } from "./types";
 import { StateIcon, AgentIcon, PrIcon, GearIcon, RefreshIcon, FlameIcon, TasksIcon, ReviewsIcon, MeditationsIcon, ClockIcon, PavilionIcon } from "./Icons";
-import Pavilion from "./Pavilion";
+import Pavilion, { PickPill } from "./Pavilion";
 import TaskPane from "./TaskPane";
 import ReviewList from "./ReviewList";
 import ReviewPane from "./ReviewPane";
@@ -137,7 +137,7 @@ export default function App() {
         {prErr && <div className="banner">{prErr}</div>}
         <ul className="tasks">
           {sortItems(p.items, sessions, prs).map((i) => {
-            const id = i.issue.id, se = sessions[id], pr = prs[id];
+            const id = i.issue.id, se = sessions[id], pr = prs[id], card = board.cards.find((c) => c.key === id);
             return (
               <li key={id}>
                 <button className={`row ${open === id && !showSettings ? "on" : ""} ${se?.status === "needsInput" ? "attn" : ""}`} title={i.issue.title}
@@ -148,6 +148,7 @@ export default function App() {
                 <AgentIcon status={se?.status} />
                 {se?.tempering && <span title="Tempering"><FlameIcon /></span>}
                 {pr && <PrIcon color={SEV[pr.overall] ?? "grey"} n={se?.escalations?.length} title={`${OVERALL[pr.overall] ?? pr.overall} #${pr.number}`} />}
+                {card?.pick && <span className="row-pick"><PickPill c={card} /></span>}
                 </button>
               </li>
             );

@@ -4,7 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import AppearanceSettings from "./AppearanceSettings";
 import { MODE_LABEL, AgentKind, ReplyMode } from "./types";
 
-type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; review_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_temper: boolean; auto_investigate: boolean; claude_check: "always" | "lowConfidence" | "off" } };
+type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; review_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { local_model: boolean; ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_temper: boolean; auto_investigate: boolean; claude_check: "always" | "lowConfidence" | "off" } };
 
 export const SECTIONS = ["Appearance", "Prompts", "Folders", "AI", "Pavilion", "Orchestrator Log", "Accounts"] as const;
 export type Section = typeof SECTIONS[number];
@@ -177,6 +177,14 @@ export default function Settings({ tab }: { tab: Section }) {
       {tab === "Pavilion" && (() => {
         const pv = s.pavilion, set = (p: Partial<S["pavilion"]>) => setS({ ...s, pavilion: { ...pv, ...p } });
         return <>
+      <label>Judgement model
+        <select value={pv.local_model ? "local" : "haiku"} onChange={(e) => set({ local_model: e.target.value === "local" })}>
+          <option value="local">Local model (Ollama)</option>
+          <option value="haiku">Claude Haiku</option>
+        </select>
+      </label>
+      <p className="muted">Who triages issues and review comments and keeps Pavilion's memory. Claude Haiku needs no setup but every judgement is a Claude call.</p>
+      {pv.local_model && <>
       <label>Ollama URL
         <input className="mono" value={pv.ollama_url} onChange={(e) => set({ ollama_url: e.target.value })} onBlur={() => loadModels(pv.ollama_url)} />
       </label>
@@ -195,6 +203,7 @@ export default function Settings({ tab }: { tab: Section }) {
       {test && <p className="muted">{test}</p>}
       {mErr ? <p className="muted">{mErr}</p> : models && !models.length && <p className="muted">Ollama is running but has no models yet.</p>}
       <p className="muted">Install Ollama and run <code>ollama pull {pv.model || "qwen3:4b"}</code>. Without it, Pavilion's judgement calls go to Claude.</p>
+      </>}
       <label>Investigate ready issues automatically
         <select value={pv.auto_investigate ? "on" : "off"} onChange={(e) => set({ auto_investigate: e.target.value === "on" })}>
           <option value="on">On</option>
@@ -208,6 +217,7 @@ export default function Settings({ tab }: { tab: Section }) {
         </select>
       </label>
       <p className="muted">Turns Tempering on for every PR an agent opens: failing checks, merge conflicts and review feedback go back to the agent. The local model sorts each review comment first: changes go to the agent, questions and decisions come to you, praise and optional nits are skipped. Switching Tempering off on a task keeps it off.</p>
+      {pv.local_model && <>
       <label>Claude check
         <select value={pv.claude_check} onChange={(e) => set({ claude_check: e.target.value as S["pavilion"]["claude_check"] })}>
           <option value="always">Always</option>
@@ -215,8 +225,9 @@ export default function Settings({ tab }: { tab: Section }) {
           <option value="off">Off</option>
         </select>
       </label>
-      <p className="muted">Claude (Haiku) checks the local model before Pavilion starts an investigation or marks an issue blocked.
-        Investigations can't edit files and ask before running commands; coding starts when you approve the plan.</p>
+      <p className="muted">Claude (Haiku) checks the local model before Pavilion starts an investigation or marks an issue blocked.</p>
+      </>}
+      <p className="muted">Investigations can't edit files and ask before running commands; coding starts when you approve the plan.</p>
         </>;
       })()}
       {tab === "Orchestrator Log" && <OrchestratorLog />}

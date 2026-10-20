@@ -286,6 +286,11 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
             } else {
                 st = Status::NeedsInput;
             }
+        } else if stop && task.starts_with("review:") {
+            // a review agent opens no PR: done = it wrote its draft (Pavilion shows "review draft ready"); otherwise it asks
+            if !Path::new(&s.worktree).join(".murim/review.json").exists() {
+                st = Status::NeedsInput;
+            }
         } else if stop && !med {
             let tt = std::mem::take(&mut s.tempering_turn);
             if tt {

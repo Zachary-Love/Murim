@@ -93,6 +93,8 @@ pub enum CheckMode {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(default)]
 pub struct PavilionSettings {
+    /// false: judgement calls skip Ollama and go straight to Claude Haiku
+    pub local_model: bool,
     pub ollama_url: String,
     pub model: String,
     /// Live agent sessions Pavilion fills up to when starting investigations.
@@ -107,7 +109,7 @@ pub struct PavilionSettings {
 
 impl Default for PavilionSettings {
     fn default() -> Self {
-        Self { ollama_url: "http://localhost:11434".into(), model: "qwen3:4b".into(), max_agents: 10, docker_slots: 2, auto_temper: true, auto_investigate: true, claude_check: CheckMode::Always }
+        Self { local_model: true, ollama_url: "http://localhost:11434".into(), model: "qwen3:4b".into(), max_agents: 10, docker_slots: 2, auto_temper: true, auto_investigate: true, claude_check: CheckMode::Always }
     }
 }
 
@@ -210,7 +212,7 @@ mod tests {
     fn pavilion_defaults_and_partial() {
         let p = PavilionSettings::default();
         assert_eq!((p.ollama_url.as_str(), p.model.as_str(), p.max_agents, p.docker_slots, p.auto_investigate, p.claude_check), ("http://localhost:11434", "qwen3:4b", 10, 2, true, CheckMode::Always));
-        assert!(p.auto_temper);
+        assert!(p.auto_temper && p.local_model);
         let s: Settings = serde_json::from_str(r#"{"pavilion": {"max_agents": 2, "claude_check": "lowConfidence"}}"#).unwrap();
         assert_eq!((s.pavilion.max_agents, s.pavilion.claude_check, s.pavilion.model.as_str()), (2, CheckMode::LowConfidence, "qwen3:4b"));
     }

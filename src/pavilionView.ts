@@ -59,12 +59,20 @@ export const pill = (c: Card): { label: string; tone: Tone } =>
 /** The robot pill: what the local model (or Claude checking it) picked for a card. */
 export const PICK: Record<Pick, { label: string; tone: Tone }> = {
   thinking: { label: "Thinking…", tone: "blue" }, pending: { label: "Not judged yet", tone: "grey" }, retrying: { label: "Retry in 10m", tone: "amber" },
-  queued: { label: "In queue", tone: "green" }, needsYou: { label: "Needs you", tone: "amber" }, blocked: { label: "Blocked", tone: "red" },
+  queued: { label: "In queue", tone: "green" }, needsYou: { label: "Waiting on you", tone: "amber" }, blocked: { label: "Blocked", tone: "red" },
+  starting: { label: "Starting next", tone: "green" }, waitingSlot: { label: "Waiting for a slot", tone: "grey" }, autoOff: { label: "Auto-start off", tone: "amber" },
+  working: { label: "Agent working", tone: "green" }, watching: { label: "Watching", tone: "blue" }, done: { label: "Done", tone: "grey" }, moved: { label: "Moved by you", tone: "grey" },
+};
+const PICK_TITLE: Partial<Record<Pick, string>> = {
+  waitingSlot: "Queued behind the agent limit (Settings → Pavilion → max agents)",
+  autoOff: "Queued, but Pavilion won't start it: paused, auto-investigate off, no repos folder, or not Claude Code (see the Orchestrator Log)",
+  watching: "Nothing to do now: the orchestrator re-checks it every minute (Tempering acts on CI, comments and conflicts of a PR)",
+  moved: "You placed this card; it goes back to automatic when something new happens",
 };
 export const pickTitle = (c: Card) => {
   const v = c.verdict;
   if (v && c.pick && !["thinking", "pending", "retrying"].includes(c.pick)) return `${v.by === "local" ? "Local model" : "Claude (checking the local model)"} · ${Math.round(v.confidence * 100)}% sure: ${v.reason}`;
-  return c.pick === "retrying" ? "The local model and Claude both failed to answer; asked again when the issue changes or in 10 minutes" : "";
+  return c.pick === "retrying" ? "The local model and Claude both failed to answer; asked again when the issue changes or in 10 minutes" : (c.pick && PICK_TITLE[c.pick]) || "";
 };
 
 /** Header status of the local model: paused / thinking / offline / idle, with the countdown to the next check. */

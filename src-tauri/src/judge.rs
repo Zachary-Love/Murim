@@ -97,6 +97,11 @@ fn ollama(url: &str, model: &str, prompt: &str, format: Value) -> Result<String,
     v["message"]["content"].as_str().map(String::from).ok_or_else(|| "Ollama: no message in the reply".into())
 }
 
+/// Who answers first, for the board header and the log.
+pub fn model_name(cfg: &PavilionSettings) -> String {
+    if cfg.local_model { cfg.model.clone() } else { "Claude Haiku".into() }
+}
+
 pub struct Outcome {
     /// None: no usable answer (Claude failed); retry later
     pub verdict: Option<Verdict>,
@@ -114,15 +119,17 @@ fn said((a, r, c): &(String, String, f32)) -> String {
 
 /// Local answer first; Claude checks when the policy says so, or answers alone when the local model failed.
 pub fn ask(cfg: &PavilionSettings, q: Q, prompt: &str, allowed: &[String], fp: &str, claude: impl Fn(&str) -> Option<String>) -> Outcome {
-    let raw = ollama(&cfg.ollama_url, &cfg.model, prompt, schema(allowed));
+    // local model off (Settings → Pavilion): Claude answers alone, and the header must not call that "offline"
+    let raw = if cfg.local_model { ollama(&cfg.ollama_url, &cfg.model, prompt, schema(allowed)) } else { Err(String::new()) };
     let local = raw.as_ref().ok().and_then(|r| parse(r, allowed));
-    let local_ok = local.is_some();
+    let local_ok = local.is_some() || !cfg.local_model;
     let said_local = local.as_ref().map(|l| (l.0.clone(), l.1.clone()));
-    let mut log = vec![match (&raw, &local) {
-        (_, Some(l)) => format!("{}: {}", cfg.model, said(l)),
-        (Ok(r), None) => format!("{}: unusable reply: {}", cfg.model, r.chars().take(200).collect::<String>()),
-        (Err(e), _) => format!("{}: failed: {e}", cfg.model),
-    }];
+    let mut log: Vec<String> = match (&raw, &local) {
+        _ if !cfg.local_model => vec![],
+        (_, Some(l)) => vec![format!("{}: {}", cfg.model, said(l))],
+        (Ok(r), None) => vec![format!("{}: unusable reply: {}", cfg.model, r.chars().take(200).collect::<String>())],
+        (Err(e), _) => vec![format!("{}: failed: {e}", cfg.model)],
+    };
     let v = |(answer, reason, confidence): (String, String, f32), by| Verdict { answer, reason, confidence, by, fingerprint: fp.to_string() };
     match local {
         Some(l) if !needs_check(cfg.claude_check, q, &l.0, l.2) => Outcome { verdict: Some(v(l, By::Local)), local_ok, log, local: said_local },
@@ -156,7 +163,8 @@ pub fn rewrite_memory(cfg: &PavilionSettings, current: &str, event: &str, claude
     let mut over = None;
     for _ in 0..2 {
         let p = memory_prompt(current, event, over);
-        let m = ollama(&cfg.ollama_url, &cfg.model, &p, format.clone()).ok().and_then(|r| parse_memory(&r)).or_else(|| claude(&p).and_then(|r| parse_memory(&r))).ok_or("neither the local model nor Claude answered")?;
+        let local = if cfg.local_model { ollama(&cfg.ollama_url, &cfg.model, &p, format.clone()).ok() } else { None };
+        let m = local.and_then(|r| parse_memory(&r)).or_else(|| claude(&p).and_then(|r| parse_memory(&r))).ok_or("neither the local model nor Claude answered")?;
         let n = m.chars().count();
         if n <= MEMORY_MAX {
             return Ok(m);
@@ -263,6 +271,11 @@ mod tests {
         let v = o.verdict.unwrap();
         assert_eq!((v.answer.as_str(), v.by, v.fingerprint.as_str()), ("needsUser", By::Claude, "fp"));
         assert!(seen.borrow().contains("local model answered"));
+        // local model off: Claude only, never "offline", Ollama never called (DOWN would fail)
+        let off = PavilionSettings { local_model: false, ..cfg(DOWN, CheckMode::Off) };
+        let o = ask(&off, Q::Ready, "p", &a, "fp", |_| Some(r#"{"answer": "ready", "reason": "ok", "confidence": 1}"#.into()));
+        assert_eq!((o.verdict.unwrap().by, o.local_ok, o.log.len()), (By::Claude, true, 1));
+        assert_eq!(model_name(&off), "Claude Haiku");
         // Ollama down: Claude answers directly (even with Off), and the header learns the local model is offline
         let o = ask(&cfg(DOWN, CheckMode::Off), Q::Ready, "p", &a, "fp", |_| Some(r#"{"answer": "ready", "reason": "ok", "confidence": 1}"#.into()));
         assert_eq!((o.verdict.unwrap().by, o.local_ok), (By::Claude, false));

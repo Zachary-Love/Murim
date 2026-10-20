@@ -437,6 +437,15 @@ pub fn post_review(app: AppHandle, key: String, draft: Draft) -> Result<(), Stri
     let r = crate::tempering::gh(&home()?.to_string_lossy(), &["api", "-X", "POST", &format!("repos/{}/{}/pulls/{}/reviews", p.owner, p.repo, p.number), "--input", &f.to_string_lossy()]);
     let _ = std::fs::remove_file(&f);
     r?;
+    // posted: the draft is no longer waiting on the user, so Pavilion's "review draft ready" (has_draft) must clear
+    if let Ok(w) = wt_of(&p) {
+        let _ = std::fs::rename(w.join(".murim/review.json"), w.join(".murim/review.posted.json"));
+    }
+    sessions::with_session(&app, &p.session_id, |s| {
+        if s.status == crate::hooks::Status::NeedsInput {
+            s.status = crate::hooks::Status::Idle; // nothing left to answer once the review is out
+        }
+    });
     refresh_reviews(app.state());
     Ok(())
 }

@@ -307,7 +307,10 @@ fn details() -> &'static Mutex<HashMap<String, PrDetail>> {
 
 pub fn log(app: &AppHandle, id: &str, message: impl Into<String>) {
     let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
-    let _ = app.emit("tempering-log", json!({"issueId": id, "at": at, "message": message.into()}));
+    let message = message.into();
+    let who = app.state::<sessions::Sessions>().snapshot().get(id).map_or_else(|| id.to_string(), sessions::title_of);
+    crate::pavilion::olog(format!("tempering {who}: {message}"));
+    let _ = app.emit("tempering-log", json!({"issueId": id, "at": at, "message": message}));
 }
 
 pub fn gh(wt: &str, args: &[&str]) -> Result<String, String> {
@@ -384,6 +387,7 @@ pub fn run(app: &AppHandle, id: &str, d: &PrDetail, h: &PrHealth) {
         let map = app.state::<sessions::Sessions>().snapshot();
         let max = crate::settings::dir(app).map(|d| crate::settings::load(&d).pavilion.max_agents).unwrap_or(10) as usize;
         if crate::pavilion::working(&map) >= max {
+            crate::pavilion::olog_once(format!("tempering {id}: waiting for a free agent slot ({max} max, Settings → Pavilion)"));
             return;
         }
     }

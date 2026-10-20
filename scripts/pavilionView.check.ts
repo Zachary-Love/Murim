@@ -47,3 +47,4 @@ assert.equal(agentStatus({ ...b, paused: true }, 900).tone, "amber");
 assert.equal(PICK.queued.label, "In queue");
 assert.match(pickTitle(card({ pick: "queued", verdict: { by: "local", confidence: 0.82, reason: "clear spec" } })), /Local model · 82% sure: clear spec/);
 assert.equal(pickTitle(card({ pick: "thinking" })), "");
+assert.match(pickTitle(card({ pick: "waitingSlot" })), /agent limit/); // plan pills explain themselves

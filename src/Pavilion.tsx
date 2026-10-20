@@ -37,7 +37,7 @@ function Meta({ c }: { c: Card }) {
 }
 
 /** What the local model picked for this card, robot on the left. */
-const PickPill = ({ c }: { c: Card }) => c.pick ? <span className={`chip pv-pick ${PICK[c.pick].tone === "grey" ? "" : PICK[c.pick].tone} ${c.pick}`} title={pickTitle(c) || undefined}><RobotIcon />{PICK[c.pick].label}</span> : null;
+export const PickPill = ({ c }: { c: Card }) => c.pick ? <span className={`chip pv-pick ${PICK[c.pick].tone === "grey" ? "" : PICK[c.pick].tone} ${c.pick}`} title={pickTitle(c) || undefined}><RobotIcon />{PICK[c.pick].label}</span> : null;
 
 const Avatar = ({ c }: { c: Card }) => c.role ? <><span className="pv-av">{ROLE_LABEL[c.role][0]}</span><span>{ROLE_LABEL[c.role]}</span></> : null;
 

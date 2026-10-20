@@ -12,7 +12,7 @@ const RECENT_DAYS: i64 = 14;
 /// The search is the priciest GitHub call Murim makes; new PRs needing work can wait a few minutes.
 const EVERY: std::time::Duration = std::time::Duration::from_secs(300);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Want {
     pub owner: String,
     pub repo: String,
@@ -56,6 +56,11 @@ fn query() -> String {
     format!("query($q:String!){{search(query:$q,type:ISSUE,first:50){{nodes{{... on PullRequest{{{} headRefName isCrossRepository createdAt last:commits(last:5){{nodes{{commit{{committedDate messageHeadline committer{{name}}}}}}}} repository{{name owner{{login}}}}}}}}}}}}", github::PR_HEALTH)
 }
 
+/// The worktree (other than `clone` itself) that has `branch` checked out, from `git worktree list --porcelain`.
+pub fn holder(porcelain: &str, branch: &str) -> Option<String> {
+    porcelain.split("\n\n").find(|b| b.lines().any(|l| l == format!("branch refs/heads/{branch}"))).and_then(|b| b.lines().next()?.strip_prefix("worktree ").map(String::from))
+}
+
 /// Worktree on the PR's own branch at ~/.murim/worktrees/<repo>/pr-<n>, so the agent's pushes land on the PR.
 fn worktree(clone: &Path, repo: &str, w: &Want) -> Result<PathBuf, String> {
     let home = PathBuf::from(std::env::var("HOME").map_err(|e| e.to_string())?);
@@ -68,8 +73,18 @@ fn worktree(clone: &Path, repo: &str, w: &Want) -> Result<PathBuf, String> {
     sessions::git(clone, &["fetch", "-q", "origin", b])?;
     let p = wt.to_string_lossy();
     if sessions::git(clone, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{b}")]).is_ok() {
+        // the branch may already be checked out elsewhere (often a leftover Claude Code subagent worktree): share it
+        // when that checkout is clean; never when it holds uncommitted work someone may still be doing
+        let mut add = vec!["worktree", "add", "-q"];
+        if let Some(other) = sessions::git(clone, &["worktree", "list", "--porcelain"]).ok().and_then(|l| holder(&l, b)) {
+            if !sessions::git(Path::new(&other), &["status", "--porcelain"]).map_err(|e| format!("{other}: {e}"))?.is_empty() {
+                return Err(format!("{b} is checked out at {other} with uncommitted changes; finish or remove that worktree (git worktree remove) and Pavilion will pick the PR up"));
+            }
+            crate::pavilion::olog(format!("adopt: {b} is also checked out (clean) at {other}; sharing the branch"));
+            add.push("--force");
+        }
         // keep the user's local branch (it may hold unpushed work); catch up with the PR when that's a fast-forward
-        sessions::git(clone, &["worktree", "add", "-q", &p, b])?;
+        sessions::git(clone, &[&add[..], &[&*p, b.as_str()]].concat())?;
         let _ = sessions::git(&wt, &["merge", "-q", "--ff-only", &format!("origin/{b}")]);
     } else {
         sessions::git(clone, &["worktree", "add", "-q", "--track", "-b", b, &p, &format!("origin/{b}")])?;
@@ -104,7 +119,10 @@ pub fn run(app: &AppHandle) {
     let sess = sessions::get_sessions(app.state());
     // PRs already owned by a Murim session (task branches) or adopted earlier
     let owned: HashSet<String> = github::get_prs(app.state()).prs.into_values().map(|p| p.url).collect();
-    let new: Vec<Want> = wants(&j, &since.format("%Y-%m-%dT%H:%M:%SZ").to_string()).into_iter().filter(|w| !owned.contains(&w.health.url) && !sess.contains_key(&session_id(&w.owner, &w.repo, w.health.number))).collect();
+    let all = wants(&j, &since.format("%Y-%m-%dT%H:%M:%SZ").to_string());
+    let open = j["data"]["search"]["nodes"].as_array().map_or(0, |v| v.len());
+    let new: Vec<Want> = all.iter().filter(|w| !owned.contains(&w.health.url) && !sess.contains_key(&session_id(&w.owner, &w.repo, w.health.number))).cloned().collect();
+    crate::pavilion::olog_once(format!("adopt: {open} open PRs of yours; {} need work and were worked on in the last {RECENT_DAYS} days ({} not picked up yet). Forks, bot branches and older PRs are left alone.", all.len(), new.len()));
     if new.is_empty() {
         return;
     }
@@ -120,7 +138,7 @@ pub fn run(app: &AppHandle) {
     let mut adopted = false;
     for w in new {
         let Some(clone) = clones.get(&(w.owner.to_lowercase(), w.repo.to_lowercase())) else {
-            crate::pavilion::olog(format!("adopt: {}/{}#{} needs work but isn't cloned under the repos folder", w.owner, w.repo, w.health.number));
+            crate::pavilion::olog_once(format!("adopt: {}/{}#{} needs work but isn't cloned under the repos folder", w.owner, w.repo, w.health.number));
             continue;
         };
         let id = session_id(&w.owner, &w.repo, w.health.number);
@@ -131,7 +149,7 @@ pub fn run(app: &AppHandle) {
                 crate::tempering::log(app, &id, format!("Pavilion picked up {}#{}: {}", w.repo, w.health.number, w.health.title));
                 adopted = true;
             }
-            Err(e) => crate::pavilion::olog(format!("adopt {id}: {e}")),
+            Err(e) => crate::pavilion::olog_once(format!("adopt {id}: {e}")), // the next passes retry quietly
         }
     }
     if adopted {
@@ -150,6 +168,14 @@ mod tests {
             v[k] = x.clone();
         }
         v
+    }
+
+    #[test]
+    fn holder_finds_the_worktree_on_a_branch() {
+        let l = "worktree /r\nHEAD a\nbranch refs/heads/main\n\nworktree /r/.claude/worktrees/agent-1\nHEAD b\nbranch refs/heads/fix/x\n\nworktree /t\nHEAD c\ndetached\n";
+        assert_eq!(holder(l, "fix/x").as_deref(), Some("/r/.claude/worktrees/agent-1"));
+        assert_eq!(holder(l, "fix"), None); // whole ref, not a prefix
+        assert_eq!(holder(l, "other"), None);
     }
 
     #[test]

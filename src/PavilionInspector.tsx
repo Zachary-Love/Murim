@@ -65,13 +65,11 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
           <h2 className="pvi-title">{c.title}</h2>
           <div className="pvi-move">
             <span className={`chip ${TONE[st.tone]}`}>{st.label}</span>
-            {c.source === "issue" && (
-              <select aria-label="Move to" title="Move this card by hand. It stays put until Pavilion sees something new (PR merged, CI failed, agent asks)." disabled={busy} value={c.manual ? c.column : ""}
-                onChange={(e) => exec("pavilion_move", { issueId: c.key, column: e.target.value || null })}>
-                <option value="">{c.manual ? "Automatic" : "Move to…"}</option>
-                {MOVE.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-              </select>
-            )}
+            <select aria-label="Move to" title="Move this card by hand. It stays put until Pavilion sees something new (PR merged, CI failed, agent asks)." disabled={busy} value={c.manual ? c.column : ""}
+              onChange={(e) => exec("pavilion_move", { key: c.key, column: e.target.value || null })}>
+              <option value="">{c.manual ? "Automatic" : "Move to…"}</option>
+              {MOVE.filter(([k]) => k !== "queued" || c.source === "issue").map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
           </div>
           {c.summary && <p className="pvi-sum">{c.summary}</p>}
         </div>

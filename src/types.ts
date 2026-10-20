@@ -103,5 +103,5 @@ export type Card = {
   view: string; target: string; pr: PrHealth | null; session: string | null; plan: string | null; updatedAt: string;
   source: "issue" | "review" | "agent"; stage: PvStage | null; role: Role | null; summary: string; url: string; verdict: Verdict | null; pick: Pick | null; manual: boolean;
 };
-export type Pick = "thinking" | "pending" | "retrying" | "queued" | "needsYou" | "blocked";
+export type Pick = "thinking" | "pending" | "retrying" | "queued" | "needsYou" | "blocked" | "starting" | "waitingSlot" | "autoOff" | "working" | "watching" | "done" | "moved";
 export type Board = { cards: Card[]; working: number; max: number; paused: boolean; localOffline: boolean; updated: number; error: string | null; model: string; thinking: string | null; judging: number; nextRun: number };
