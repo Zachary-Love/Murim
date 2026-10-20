@@ -1,7 +1,7 @@
 {
   "name": "murim",
   "private": true,
-  "version": "0.3.2",
+  "version": "0.3.3",
   "license": "MIT",
   "packageManager": "pnpm@9.15.9",
   "type": "module",
