@@ -25,7 +25,7 @@ list, puts Claude Code to work on a task with one button, and babysits the PR to
 | **Updates** | Murim checks for new releases and updates itself in place (signed updates). |
 | **Caffeine** | Keeps the Mac awake while flows run. |
 
-macOS only for now. Version 0.3.6 is early software.
+macOS only for now. Version 0.3.7 is early software.
 
 ## Install
 
@@ -95,7 +95,7 @@ Design notes for each feature live in [docs/specs](docs/specs).
 ## Releasing
 
 Bump the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json`, commit, then
-push a tag: `git tag v0.3.6 && git push origin v0.3.6`. GitHub Actions builds the Apple Silicon `.dmg` and publishes
+push a tag: `git tag v0.3.7 && git push origin v0.3.7`. GitHub Actions builds the Apple Silicon `.dmg` and publishes
 the release.
 
 Releases are signed for the in-app updater with the `TAURI_SIGNING_PRIVATE_KEY` and
