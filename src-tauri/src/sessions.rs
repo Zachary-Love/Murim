@@ -184,6 +184,11 @@ pub fn is_automation(id: &str) -> bool {
     id.starts_with("automation:")
 }
 
+/// One of the user's PRs Pavilion picked up (adopt.rs), keyed `pr:<owner>/<repo>/<n>`.
+pub fn is_adopted(id: &str) -> bool {
+    id.starts_with("pr:")
+}
+
 /// Pavilion's read-only planning session keyed `investigation:<issueId>`.
 pub fn is_investigation(id: &str) -> bool {
     id.starts_with("investigation:")
@@ -200,6 +205,9 @@ pub fn title_of(s: &SessionInfo) -> String {
     }
     if let Some(pr) = s.issue_id.strip_prefix("review:") {
         return format!("Review {pr}"); // "Review owner/repo/12"
+    }
+    if let Some((repo, n)) = s.issue_id.strip_prefix("pr:").and_then(|p| p.split('/').nth(1).zip(p.rsplit('/').next())) {
+        return format!("{repo}#{n}");
     }
     Path::new(&s.worktree).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| s.issue_id.clone())
 }
@@ -786,7 +794,11 @@ pub fn resume_task(app: AppHandle, issue_id: String, prompt: Option<String>) -> 
         // ponytail: no generic resume; rerun the command in the worktree with the follow-up (if any)
         return spawn(&app, &issue_id, prompt.into_iter().collect());
     }
-    let mut head = vec!["--resume".to_string(), sid.ok_or("no session id to resume")?];
+    let mut head = match sid {
+        Some(sid) => vec!["--resume".to_string(), sid],
+        None if is_adopted(&issue_id) => vec![], // adopted PR: Claude's first run here
+        None => return Err("no session id to resume".into()),
+    };
     head.extend(prompt);
     spawn(&app, &issue_id, head)
 }
@@ -844,6 +856,14 @@ fn start_agent(app: &AppHandle, id: &str, wt: &str, name: String, head: Vec<Stri
         Ok(())
     })?;
     spawn(app, id, head)
+}
+
+/// Idle session for an adopted PR: nothing runs until Tempering has work for it (and an agent slot).
+pub fn adopt(app: &AppHandle, id: &str, wt: &str) {
+    let mode = settings::dir(app).map(|d| settings::load(&d).default_permission_mode).unwrap_or_default();
+    update(app, |g| {
+        g.map.entry(id.into()).or_insert_with(|| SessionInfo { issue_id: id.into(), worktree: wt.into(), session_id: None, status: Status::Ended, questions: None, pty_alive: false, permission_mode: mode, tempering: true, tempering_off: false, tempering_note: String::new(), escalations: vec![], memory: Default::default(), pr_flow: PrFlow::Ready, agent: AgentKind::Claude, agent_command: String::new(), name: String::new(), tempering_turn: false });
+    });
 }
 
 /// Kill a session's PTY and drop it (review dismissed / PR closed).

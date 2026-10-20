@@ -24,11 +24,11 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
   const [busy, setBusy] = useState(false);
   const c = card, pr = c.pr, st = pill(c), step = stepOf(c.stage);
   const hasTerm = !!(c.session && sessions[c.session]);
-  // the coding session's draft PR, reviewed here like Tasks → Review
-  const coding = c.source === "issue" && c.session === c.key ? sessions[c.key] : undefined;
+  // the coding session's draft PR, reviewed here like Tasks → Review; adopted PRs (pr:…) for their escalations
+  const coding = (c.source === "issue" && c.session === c.key) || c.key.startsWith("pr:") ? sessions[c.key] : undefined;
   const toReview = coding?.prFlow === "awaitingReview" || coding?.prFlow === "opened";
   const [tab, setTab] = useState<Tab>(c.plan ? "plan" : coding?.escalations?.length ? "overview" : toReview && coding?.status !== "needsInput" ? "review" : hasTerm && c.column === "needsYou" ? "terminal" : "overview");
-  const tabs = TABS.filter(([k]) => k === "overview" || (k === "plan" ? !!c.plan : k === "review" ? !!coding?.worktree : k === "terminal" ? hasTerm : log.length > 0));
+  const tabs = TABS.filter(([k]) => k === "overview" || (k === "plan" ? !!c.plan : k === "review" ? c.source === "issue" && !!coding?.worktree : k === "terminal" ? hasTerm : log.length > 0));
   const cur = tabs.some(([k]) => k === tab) ? tab : "overview";
   const view = VIEW_LABEL[c.view] ?? c.view;
   const exec = async (cmd: string, args: Record<string, unknown>) => { setBusy(true); try { await run(cmd, args); } finally { setBusy(false); } };
@@ -157,7 +157,7 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
         )}
       </div>
       <div className="pvi-foot">
-        <button className="btn" onClick={open}>Open in {view}</button>
+        {c.view !== "pavilion" && <button className="btn" onClick={open}>Open in {view}</button>}
         {!c.action && hasTerm && <button className={`btn ${toReview || coding?.escalations?.length ? "" : "primary"}`} onClick={() => setTab("terminal")}>Open terminal</button>}
         {primary && <button className="btn primary" disabled={busy || primary.off} onClick={primary.go}>{primary.label}</button>}
       </div>

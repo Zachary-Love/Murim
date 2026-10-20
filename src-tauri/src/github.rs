@@ -284,6 +284,7 @@ fn poll(app: &AppHandle) {
 pub fn start(app: AppHandle) {
     std::thread::spawn(move || loop {
         poll(&app);
+        crate::adopt::run(&app); // after poll: it skips PRs Murim's own task sessions already cover
         crate::pavilion::poke(&app);
         let (m, cv) = &app.state::<Github>().wake;
         drop(cv.wait_timeout_while(m.lock().unwrap(), Duration::from_secs(60), |woken| !*woken).unwrap().0);

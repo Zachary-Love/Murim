@@ -10,7 +10,7 @@ use std::process::Command;
 use std::time::Duration;
 use crate::judge::{self, Q};
 use std::sync::{Mutex, OnceLock};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 const MAX_INVOKES: u32 = 3;
 const LOG_LINES: usize = 80;
@@ -378,6 +378,15 @@ pub fn run(app: &AppHandle, id: &str, d: &PrDetail, h: &PrHealth) {
     if !on || !matches!(status, Status::Idle | Status::Ended) || now() < mem.retry_at {
         return;
     }
+    // an adopted PR's Claude starts fresh (no PTY yet): that takes an agent slot like any new agent
+    let fresh = sessions::is_adopted(id) && sessions::with_session(app, id, |s| !s.pty_alive).unwrap_or(false);
+    if fresh {
+        let map = app.state::<sessions::Sessions>().snapshot();
+        let max = crate::settings::dir(app).map(|d| crate::settings::load(&d).pavilion.max_agents).unwrap_or(10) as usize;
+        if crate::pavilion::working(&map) >= max {
+            return;
+        }
+    }
     if triage(app, id, d, &mut mem) {
         if let Some(t) = sessions::with_session(app, id, |s| {
             s.status = Status::NeedsInput;
@@ -387,6 +396,9 @@ pub fn run(app: &AppHandle, id: &str, d: &PrDetail, h: &PrHealth) {
         }
     }
     let (mut invokes, mut prompts, mut logs) = (vec![], vec![], vec![]);
+    if sessions::is_adopted(id) && sessions::with_session(app, id, |s| s.session_id.is_none()).unwrap_or(false) {
+        prompts.push(format!("This worktree is the branch of your PR {} ({}). Pull the latest first (`git pull --ff-only`).", h.url, h.title));
+    }
     for a in decide(d, h, &mut mem) {
         match a {
             Action::Rerun { key, check, run_id } => match gh(&wt, &["run", "rerun", &run_id.to_string(), "--failed"]) {

@@ -402,6 +402,10 @@ fn with_store<R>(app: &AppHandle, f: impl FnOnce(&mut Store) -> R) -> R {
     r
 }
 
+pub fn is_paused(app: &AppHandle) -> bool {
+    pv(app).data.lock().unwrap().store.paused
+}
+
 pub fn poke(app: &AppHandle) {
     if let Some(p) = app.try_state::<Pavilion>() {
         *p.wake.0.lock().unwrap() = true;
@@ -491,6 +495,15 @@ fn reconcile(app: &AppHandle) {
             cards.push(Card { key: p.key.clone(), column: dec.column, ident: format!("{}#{}", p.repo, p.number), title: p.health.title.clone(), repo: p.repo.clone(), reason: dec.reason, view: "reviews".into(), target: p.key.clone(), pr: Some(p.health.clone()), source: Source::Review, stage: Some(Stage::Review), role: map.get(&p.session_id).map(|_| Role::Reviewer), session: map.contains_key(&p.session_id).then(|| p.session_id.clone()), url: p.health.url.clone(), ..Default::default() });
         }
         for (id, s) in &map {
+            if sessions::is_adopted(id) {
+                // one of the user's PRs Pavilion picked up: on the board while open, Tempering keeps it moving
+                let Some(p) = prs.get(id).filter(|p| p.state == crate::github::PrState::Open) else { continue };
+                let dec = decide_agent(s).unwrap_or_else(|| d(Column::Watching, "Tempering watches this PR"));
+                let reason = if s.tempering_turn && !s.tempering_note.is_empty() && dec.column == Column::Working { s.tempering_note.clone() } else { dec.reason };
+                let repo = id.trim_start_matches("pr:").split('/').nth(1).unwrap_or_default().to_string();
+                cards.push(Card { key: id.clone(), column: dec.column, ident: format!("{repo}#{}", p.number), title: p.title.clone(), repo, reason, view: "pavilion".into(), target: id.clone(), pr: Some(p.clone()), session: Some(id.clone()), source: Source::Agent, role: Some(Role::Coder), url: p.url.clone(), ..Default::default() });
+                continue;
+            }
             if !(sessions::is_automation(id) || sessions::is_meditation(id)) {
                 continue;
             }

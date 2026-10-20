@@ -7,6 +7,7 @@ mod inbox;
 mod github;
 mod hooks;
 mod sessions;
+mod adopt;
 mod tempering;
 mod review;
 mod reviews;
