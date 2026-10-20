@@ -61,11 +61,30 @@ struct Pty {
     child: Box<dyn Child + Send + Sync>,
 }
 
+/// The last RING bytes of a PTY's output, plus how many bytes it has ever written: a remounted terminal replays the
+/// snapshot and drops the live chunks it already holds (those ending at or before the snapshot's `end`).
+#[derive(Default)]
+struct Ring {
+    bytes: VecDeque<u8>,
+    end: u64,
+}
+
+impl Ring {
+    /// Append a chunk; returns the stream offset just past it.
+    fn push(&mut self, b: &[u8]) -> u64 {
+        self.bytes.extend(b);
+        let over = self.bytes.len().saturating_sub(RING);
+        self.bytes.drain(..over);
+        self.end += b.len() as u64;
+        self.end
+    }
+}
+
 #[derive(Default)]
 struct Inner {
     map: HashMap<String, SessionInfo>,
     ptys: HashMap<String, Pty>,
-    bufs: HashMap<String, VecDeque<u8>>,
+    bufs: HashMap<String, Ring>,
     gen: u64,
 }
 
@@ -588,7 +607,7 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
     let gen = update(app, |g| {
         g.gen += 1;
         g.ptys.insert(issue_id.into(), Pty { gen: g.gen, writer, master: pair.master, child });
-        g.bufs.insert(issue_id.into(), VecDeque::new());
+        g.bufs.insert(issue_id.into(), Ring::default());
         let s = g.map.get_mut(issue_id).unwrap();
         // no hooks for custom agents: "working" for as long as the process runs
         (s.pty_alive, s.status, s.questions) = (true, if custom { Status::Working } else { Status::Starting }, None);
@@ -601,14 +620,8 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
             if n == 0 {
                 break;
             }
-            {
-                let mut g = sessions(&app).0.lock().unwrap();
-                let b = g.bufs.entry(id.clone()).or_default();
-                b.extend(&buf[..n]);
-                let over = b.len().saturating_sub(RING);
-                b.drain(..over);
-            }
-            let _ = app.emit("pty-output", json!({"issueId": id, "data": B64.encode(&buf[..n])}));
+            let end = sessions(&app).0.lock().unwrap().bufs.entry(id.clone()).or_default().push(&buf[..n]);
+            let _ = app.emit("pty-output", json!({"issueId": id, "data": B64.encode(&buf[..n]), "end": end}));
             // dialog detection over a rolling window so a phrase split across reads still matches
             tail.push_str(&squash(&String::from_utf8_lossy(&buf[..n])));
             if !custom && !trusted && (tail.contains("trustthisfolder") || tail.contains("doyoutrust")) {
@@ -679,7 +692,7 @@ pub fn open_shell(app: AppHandle, issue_id: String) -> Result<String, String> {
         let gen = g.gen;
         let id = format!("{}{gen}", shell_prefix(&issue_id));
         g.ptys.insert(id.clone(), Pty { gen, writer, master: pair.master, child });
-        g.bufs.insert(id.clone(), VecDeque::new());
+        g.bufs.insert(id.clone(), Ring::default());
         id
     };
     let (a, i) = (app.clone(), id.clone());
@@ -689,14 +702,8 @@ pub fn open_shell(app: AppHandle, issue_id: String) -> Result<String, String> {
             if n == 0 {
                 break;
             }
-            {
-                let mut g = sessions(&a).0.lock().unwrap();
-                let b = g.bufs.entry(i.clone()).or_default();
-                b.extend(&buf[..n]);
-                let over = b.len().saturating_sub(RING);
-                b.drain(..over);
-            }
-            let _ = a.emit("pty-output", json!({"issueId": i, "data": B64.encode(&buf[..n])}));
+            let end = sessions(&a).0.lock().unwrap().bufs.entry(i.clone()).or_default().push(&buf[..n]);
+            let _ = a.emit("pty-output", json!({"issueId": i, "data": B64.encode(&buf[..n]), "end": end}));
         }
         let mut g = sessions(&a).0.lock().unwrap();
         g.ptys.remove(&i);
@@ -902,10 +909,11 @@ pub fn pty_resize(state: State<Sessions>, issue_id: String, cols: u16, rows: u16
 }
 
 #[tauri::command]
-pub fn pty_snapshot(state: State<Sessions>, issue_id: String) -> String {
+pub fn pty_snapshot(state: State<Sessions>, issue_id: String) -> Value {
     let g = state.0.lock().unwrap();
-    let (a, b) = g.bufs.get(&issue_id).map(|b| b.as_slices()).unwrap_or_default();
-    B64.encode([a, b].concat())
+    let Some(r) = g.bufs.get(&issue_id) else { return json!({"data": "", "end": 0}) };
+    let (a, b) = r.bytes.as_slices();
+    json!({"data": B64.encode([a, b].concat()), "end": r.end})
 }
 
 /// Lowercase letters only, ANSI escapes dropped: TUIs move the cursor between words
@@ -945,6 +953,14 @@ mod tests {
         assert_eq!(twice["hooks"]["Stop"][0]["hooks"][0]["command"], "echo mine");
         assert_eq!(twice["hooks"]["SessionEnd"].as_array().unwrap().len(), 1);
         assert_eq!(merge_hooks(json!("junk"))["hooks"].as_object().unwrap().len(), 7);
+    }
+
+    #[test]
+    fn ring_keeps_the_tail_and_counts_everything() {
+        let mut r = Ring::default();
+        assert_eq!(r.push(b"abc"), 3);
+        assert_eq!(r.push(&vec![b'x'; RING]), 3 + RING as u64);
+        assert_eq!((r.bytes.len(), r.bytes[0]), (RING, b'x')); // oldest bytes dropped, offset still counts them
     }
 
     #[test]

@@ -193,11 +193,14 @@ pub struct Reviews {
 }
 
 fn search_query() -> String {
-    format!("query($q:String!){{viewer{{login}} search(query:$q,type:ISSUE,first:50){{nodes{{... on PullRequest{{{} body headRefName author{{login}} repository{{name owner{{login}}}}}}}}}}}}", github::PR_FIELDS)
+    format!("query($q:String!){{viewer{{login}} search(query:$q,type:ISSUE,first:50){{nodes{{... on PullRequest{{{} body headRefName author{{login}} repository{{name owner{{login}}}}}}}}}}}}", github::PR_HEALTH)
 }
 
-fn url_query() -> String {
-    format!("query($u:URI!){{resource(url:$u){{... on PullRequest{{{} body headRefName author{{login}} repository{{name owner{{login}}}}}}}}}}", github::PR_FIELDS)
+/// Many PR URLs in one query (aliases p0, p1, …): one point for the batch instead of one per PR.
+pub fn urls_query(n: usize) -> String {
+    let vars: Vec<String> = (0..n).map(|i| format!("$u{i}:URI!")).collect();
+    let body: String = (0..n).map(|i| format!("p{i}:resource(url:$u{i}){{... on PullRequest{{{} body headRefName author{{login}} repository{{name owner{{login}}}}}}}} ", github::PR_HEALTH)).collect();
+    format!("query({}){{{body}}}", vars.join(","))
 }
 
 /// (viewer login, PRs where GitHub asks the viewer or one of their teams to review).
@@ -207,18 +210,22 @@ fn requested(tok: &str) -> Result<(String, Vec<ReviewPr>), String> {
     Ok((me, j["data"]["search"]["nodes"].as_array().into_iter().flatten().filter_map(|n| to_review(n, true)).collect()))
 }
 
-/// The team's Linear-linked PRs, minus URLs already fetched via search. ponytail: one GitHub query per PR; alias-batch if slow.
+/// The team's Linear-linked PRs, minus URLs already fetched via search; 50 per GitHub query.
 fn team(tok: &str, skip: &[String]) -> Result<Vec<ReviewPr>, String> {
     let key = linear::api_key()?;
+    let mut links = linear::team_pr_links(&key)?;
+    links.retain(|(u, ..)| !skip.contains(u));
+    let mut seen = std::collections::HashSet::new();
+    links.retain(|(u, ..)| seen.insert(u.clone()));
     let mut out: Vec<ReviewPr> = vec![];
-    for (url, issue, who) in linear::team_pr_links(&key)? {
-        if skip.contains(&url) || out.iter().any(|p| p.health.url == url) {
-            continue;
-        }
-        let j = github::gql(tok, &url_query(), json!({"u": url}))?;
-        if let Some(mut p) = to_review(&j["data"]["resource"], false) {
-            link(&mut p, issue, who);
-            out.push(p);
+    for chunk in links.chunks(50) {
+        let vars: serde_json::Map<String, Value> = chunk.iter().enumerate().map(|(i, (u, ..))| (format!("u{i}"), json!(u))).collect();
+        let j = github::gql(tok, &urls_query(chunk.len()), Value::Object(vars))?;
+        for (i, (_, issue, who)) in chunk.iter().enumerate() {
+            if let Some(mut p) = to_review(&j["data"][format!("p{i}")], false) {
+                link(&mut p, issue.clone(), who.clone());
+                out.push(p);
+            }
         }
     }
     Ok(out)
@@ -288,6 +295,12 @@ fn poll(app: &AppHandle) {
     }
     let st = app.state::<Reviews>();
     let mut cur = st.payload.lock().unwrap();
+    let mut p = p;
+    if p.error.is_some() {
+        // a failed source (e.g. rate limit) keeps its last rows instead of emptying the list
+        let old = std::mem::take(&mut cur.prs);
+        p.prs = merge(p.prs, old);
+    }
     *cur = p;
     let _ = app.emit("reviews-updated", &*cur); // also when unchanged: it ends the frontend's refresh loader
 }
@@ -356,9 +369,12 @@ pub fn stale(session_ids: &[String], open: &[ReviewPr]) -> Vec<String> {
     session_ids.iter().filter(|id| id.starts_with("review:") && !open.iter().any(|p| &p.session_id == *id)).cloned().collect()
 }
 
-fn review_prompt(p: &ReviewPr) -> String {
+/// `extra`: Settings → Review prompt, appended under "Instructions:" like sessions.rs does default_prompt.
+fn review_prompt(p: &ReviewPr, extra: &str) -> String {
+    let extra = extra.trim();
+    let extra = if extra.is_empty() { String::new() } else { format!("\n\nInstructions:\n{extra}") };
     let who = match &p.author { Author::Linear { name, .. } => name.clone(), Author::Unlinked { login } => login.clone() };
-    format!("You are reviewing pull request {url} \"{title}\" by {who}. Its code is checked out here (detached HEAD); the base branch is origin/{base}. Read the change with `git diff origin/{base}...HEAD` and the surrounding code.\n\nDo NOT post to GitHub, comment, commit or push. Murim posts the review after the user approves it.\n\nWrite your review to .murim/review.json as JSON: {{\"summary\": string (markdown), \"event\": \"COMMENT\" | \"APPROVE\" | \"REQUEST_CHANGES\", \"comments\": [{{\"path\": string, \"line\": number (line in the new version of the file; must be inside the diff), \"body\": string}}]}}. Write the file in one go, then say it is ready.\n\nPR description:\n{body}",
+    format!("You are reviewing pull request {url} \"{title}\" by {who}. Its code is checked out here (detached HEAD); the base branch is origin/{base}. Read the change with `git diff origin/{base}...HEAD` and the surrounding code.\n\nDo NOT post to GitHub, comment, commit or push. Murim posts the review after the user approves it.\n\nWrite your review to .murim/review.json as JSON: {{\"summary\": string (markdown), \"event\": \"COMMENT\" | \"APPROVE\" | \"REQUEST_CHANGES\", \"comments\": [{{\"path\": string, \"line\": number (line in the new version of the file; must be inside the diff), \"body\": string}}]}}. Write the file in one go, then say it is ready.\n\nPR description:\n{body}{extra}",
         url = p.health.url, title = p.health.title, base = p.base, body = p.body)
 }
 
@@ -393,7 +409,8 @@ pub fn start_review_agent(app: AppHandle, key: String) -> Result<String, String>
     sessions::write_hooks(&wt)?;
     std::fs::create_dir_all(wt.join(".murim")).map_err(|e| e.to_string())?;
     let _ = std::fs::remove_file(wt.join(".murim/review.json")); // a re-run drafts afresh
-    sessions::start_review(&app, &p.session_id, &wt.to_string_lossy(), review_prompt(&p))?;
+    let cfg = crate::settings::load(&crate::settings::dir(&app)?);
+    sessions::start_review(&app, &p.session_id, &wt.to_string_lossy(), review_prompt(&p, &cfg.review_prompt))?;
     Ok(p.session_id)
 }
 
@@ -489,6 +506,13 @@ mod tests {
         assert_eq!(session_id("o", "r", 5), "review:o/r/5");
         assert_eq!(parse_session("review:o/r/5"), Some(("o".into(), "r".into(), 5)));
         assert_eq!(parse_session("issue-1"), None);
+    }
+
+    #[test]
+    fn review_prompt_appends_setting() {
+        let p = to_review(&node(1, "amy", "main"), true).unwrap();
+        assert!(review_prompt(&p, "  ").ends_with("PR description:\nb"));
+        assert!(review_prompt(&p, " check tests \n").ends_with("PR description:\nb\n\nInstructions:\ncheck tests"));
     }
 
     #[test]

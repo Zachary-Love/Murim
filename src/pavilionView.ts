@@ -6,7 +6,7 @@ export const CHIPS: [Chip, string][] = [["all", "All"], ["needsYou", "Needs you"
 export type Filters = { chip: Chip; q: string; source: "all" | Card["source"]; repo: string };
 export const NO_FILTERS: Filters = { chip: "all", q: "", source: "all", repo: "all" };
 export const SOURCE_LABEL: Record<Card["source"], string> = { issue: "Linear issues", review: "Review PRs", agent: "Agents" };
-export const ROLE_LABEL: Record<Role, string> = { investigator: "Investigator", coder: "Coder", reviewer: "Reviewer", automation: "Automation", meditation: "Meditation" };
+export const ROLE_LABEL: Record<Role, string> = { investigator: "Investigator", coder: "Coder", reviewer: "Reviewer", automation: "Automation" };
 export const VIEW_LABEL: Record<string, string> = { tasks: "Tasks", reviews: "Reviews", automations: "Automations", meditations: "Meditations" };
 
 const failing = (c: Card) => c.pr?.overall === "ciFailing";

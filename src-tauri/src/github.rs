@@ -1,14 +1,15 @@
 use crate::{sessions, tempering};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-#[derive(Serialize, Clone, Copy, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub enum PrState {
     Open,
@@ -16,7 +17,7 @@ pub enum PrState {
     Closed,
 }
 
-#[derive(Serialize, Clone, Copy, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub enum Ci {
     Passing,
@@ -25,7 +26,7 @@ pub enum Ci {
     None,
 }
 
-#[derive(Serialize, Clone, Copy, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub enum Overall {
     Merged,
@@ -40,7 +41,7 @@ pub enum Overall {
     ReadyToMerge,
 }
 
-#[derive(Serialize, Clone, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct PrHealth {
     pub number: u64,
@@ -182,26 +183,69 @@ pub fn token() -> Result<String, String> {
     }
 }
 
-/// GraphQL selection for one PR: shared by the per-branch poll and review mode.
+/// Health only (what `pr_node` reads), for searches and review lists. GitHub charges GraphQL by the nodes a query could
+/// return: PR_FIELDS' 10 comments on each of 100 threads cost ~1 point per PR, ~52 for a 50-PR search; this is ~2.
+pub const PR_HEALTH: &str = "number url title state isDraft mergeable reviewDecision headRefOid baseRefName reviewThreads(first:100){nodes{isResolved isOutdated}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name conclusion status} ... on StatusContext{context state}}}}}}}";
+
+/// GraphQL selection for one PR with threads and reviews (Tempering reads them): the per-branch poll only.
 pub const PR_FIELDS: &str = "number url title state isDraft mergeable reviewDecision headRefOid baseRefName reviewThreads(first:100){nodes{id path line isResolved isOutdated comments(last:10){nodes{databaseId author{login} body}}}} latestReviews(first:20){nodes{id state body author{login}}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name conclusion status databaseId checkSuite{workflowRun{databaseId}}} ... on StatusContext{context state}}}}}}}";
 
 fn branch_query() -> String {
     format!("query($o:String!,$n:String!,$b:String!){{viewer{{login}} repository(owner:$o,name:$n){{pullRequests(headRefName:$b,first:1,orderBy:{{field:CREATED_AT,direction:DESC}},states:[OPEN,MERGED,CLOSED]){{nodes{{{PR_FIELDS}}}}}}}}}")
 }
 
+/// unix secs until which every GitHub query is skipped: hitting a rate limit again only pushes the reset further out
+static LIMITED_UNTIL: AtomicU64 = AtomicU64::new(0);
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// When to try again after a rate limit: Retry-After (secondary limits), else X-RateLimit-Reset, else a minute.
+pub fn backoff(reset: Option<&str>, retry_after: Option<&str>, now: u64) -> u64 {
+    retry_after.and_then(|s| s.parse::<u64>().ok()).map(|s| now + s).or_else(|| reset.and_then(|s| s.parse().ok())).filter(|&t| t > now).unwrap_or(now + 60)
+}
+
+fn limited(until: u64) -> String {
+    let at = chrono::DateTime::from_timestamp(until as i64, 0).map(|d| d.with_timezone(&chrono::Local).format("%H:%M").to_string()).unwrap_or_default();
+    format!("GitHub rate limit reached; Murim resumes GitHub checks at {at}")
+}
+
 pub fn gql(tok: &str, query: &str, vars: Value) -> Result<Value, String> {
-    let j: Value = ureq::post("https://api.github.com/graphql")
+    let until = LIMITED_UNTIL.load(Ordering::Relaxed);
+    if until > now_secs() {
+        return Err(limited(until));
+    }
+    let r = match ureq::post("https://api.github.com/graphql")
         .set("Authorization", &format!("bearer {tok}"))
         .set("User-Agent", "murim")
         .timeout(Duration::from_secs(20))
         .send_json(json!({"query": query, "variables": vars}))
-        .map_err(|e| format!("GitHub: {e}"))?
-        .into_json()
-        .map_err(|e| e.to_string())?;
-    match j["errors"][0]["message"].as_str() {
+    {
+        Ok(r) => r,
+        Err(ureq::Error::Status(403 | 429, r)) => r, // rate limits (or permissions): the body says which
+        Err(e) => return Err(format!("GitHub: {e}")),
+    };
+    let h = |k: &str| r.header(k).map(String::from);
+    let (reset, retry, remaining) = (h("x-ratelimit-reset"), h("retry-after"), h("x-ratelimit-remaining"));
+    let j: Value = r.into_json().map_err(|e| e.to_string())?;
+    let msg = j["errors"][0]["message"].as_str().or(j["message"].as_str());
+    let hit = j["errors"][0]["type"] == "RATE_LIMITED" || msg.is_some_and(|m| m.to_lowercase().contains("rate limit"));
+    if hit || remaining.as_deref() == Some("0") {
+        let t = backoff(reset.as_deref(), retry.as_deref(), now_secs());
+        LIMITED_UNTIL.store(t, Ordering::Relaxed);
+        crate::pavilion::olog(limited(t));
+    }
+    match msg {
+        Some(m) if hit => Err(format!("{} ({m})", limited(LIMITED_UNTIL.load(Ordering::Relaxed)))),
         Some(m) => Err(format!("GitHub: {m}")),
         None => Ok(j),
     }
+}
+
+/// ~/.murim/prs.json: the last known health per session, so a restart or a GitHub outage doesn't empty the board.
+fn cache_path() -> Option<std::path::PathBuf> {
+    std::env::var("HOME").ok().map(|h| std::path::PathBuf::from(h).join(".murim/prs.json"))
 }
 
 fn query(tok: &str, owner: &str, name: &str, branch: &str) -> Result<Value, String> {
@@ -231,6 +275,11 @@ fn poll(app: &AppHandle) {
         }
         if g.payload != before {
             let _ = app.emit("prs-updated", &g.payload);
+            if g.payload.prs != before.prs {
+                if let (Some(p), Ok(s)) = (cache_path(), serde_json::to_string(&g.payload.prs)) {
+                    let _ = std::fs::write(p, s);
+                }
+            }
         }
     };
     let tok = match token() {
@@ -250,11 +299,20 @@ fn poll(app: &AppHandle) {
             }
             continue;
         }
+        // a closed PR on an idle session won't change; a live agent may open a new one on the branch
+        if let Some(p) = old.get(id).filter(|p| p.state == PrState::Closed && !s.pty_alive) {
+            prs.insert(id.clone(), p.clone());
+            continue;
+        }
         let res = locate(app, wt, id).and_then(|(repo, o, n, b)| query(&tok, &o, &n, &b).map(|j| (repo, b, j)));
         let (repo, branch, j) = match res {
             Ok(r) => r,
             Err(e) => {
                 error = Some(format!("{}: {e}", wt.file_name().unwrap_or_default().to_string_lossy()));
+                // keep the last known health: a dropped PR reads as "no PR" to Pavilion and Tempering
+                if let Some(p) = old.get(id) {
+                    prs.insert(id.clone(), p.clone());
+                }
                 continue;
             }
         };
@@ -281,14 +339,22 @@ fn poll(app: &AppHandle) {
     }
 }
 
+/// Stop hooks poke the poll; several agents stopping together would otherwise poll every session each time.
+const MIN_GAP: Duration = Duration::from_secs(15);
+
 pub fn start(app: AppHandle) {
+    if let Some(prs) = cache_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()) {
+        app.state::<Github>().inner.lock().unwrap().payload.prs = prs;
+    }
     std::thread::spawn(move || loop {
+        let at = Instant::now();
         poll(&app);
         crate::adopt::run(&app); // after poll: it skips PRs Murim's own task sessions already cover
         crate::pavilion::poke(&app);
         let (m, cv) = &app.state::<Github>().wake;
         drop(cv.wait_timeout_while(m.lock().unwrap(), Duration::from_secs(60), |woken| !*woken).unwrap().0);
         *m.lock().unwrap() = false;
+        std::thread::sleep(MIN_GAP.saturating_sub(at.elapsed()));
     });
 }
 
@@ -319,6 +385,22 @@ pub fn refresh_prs(state: State<Github>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backoff_prefers_retry_after_then_reset() {
+        assert_eq!(backoff(Some("2000"), Some("30"), 1000), 1030);
+        assert_eq!(backoff(Some("2000"), None, 1000), 2000);
+        assert_eq!(backoff(Some("900"), None, 1000), 1060); // reset in the past: a minute
+        assert_eq!(backoff(None, None, 1000), 1060);
+    }
+
+    #[test]
+    fn health_fields_cover_what_pr_node_reads() {
+        for f in ["number", "url", "title", "state", "isDraft", "mergeable", "reviewDecision", "isResolved", "isOutdated", "statusCheckRollup", "conclusion", "context"] {
+            assert!(PR_HEALTH.contains(f), "{f}");
+        }
+        assert!(!PR_HEALTH.contains("comments")); // the expensive part
+    }
 
     fn pr(extra: Value) -> PrHealth {
         let mut n = json!({"number": 7, "url": "u", "title": "t", "state": "OPEN", "isDraft": false, "mergeable": "MERGEABLE", "reviewDecision": "APPROVED",

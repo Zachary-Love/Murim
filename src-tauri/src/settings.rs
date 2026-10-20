@@ -33,6 +33,8 @@ pub struct Settings {
     pub caffeine: bool,
     /// Appended to every task prompt under "Instructions:" when non-empty.
     pub default_prompt: String,
+    /// Appended to every review agent's prompt under "Instructions:" when non-empty.
+    pub review_prompt: String,
     /// How Tempering posts Claude's review-comment replies.
     pub reply_mode: crate::tempering::ReplyMode,
     /// Linear label -> repo path (remembered matches).
@@ -194,7 +196,7 @@ mod tests {
         let d = std::env::temp_dir().join(format!("murim-settings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         assert_eq!(load(&d), Settings::default()); // missing
-        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into(), review_filters: ReviewFilters { authors: vec!["u1".into(), "unlinked".into()], statuses: vec!["draft".into()], repos: vec!["o/api".into()] }, review_badge: ReviewBadge::Dot, meditations_dir: "/m".into(), appearance: serde_json::json!({"mode": "custom", "base": "#efe6d8"}), pavilion: PavilionSettings { max_agents: 5, ..Default::default() } };
+        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), review_prompt: "check tests".into(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into(), review_filters: ReviewFilters { authors: vec!["u1".into(), "unlinked".into()], statuses: vec!["draft".into()], repos: vec!["o/api".into()] }, review_badge: ReviewBadge::Dot, meditations_dir: "/m".into(), appearance: serde_json::json!({"mode": "custom", "base": "#efe6d8"}), pavilion: PavilionSettings { max_agents: 5, ..Default::default() } };
         save(&d, &s).unwrap();
         assert_eq!(load(&d), s);
         std::fs::write(d.join("settings.json"), "{not json").unwrap();

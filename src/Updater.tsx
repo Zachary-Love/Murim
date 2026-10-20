@@ -7,11 +7,13 @@ export default function Updater() {
   const [update, setUpdate] = useState<Update | null>(null);
   const [status, setStatus] = useState("");
   useEffect(() => {
-    // Silent on failure: offline, or no latest.json published yet.
-    const poll = () => check().then(setUpdate).catch(() => {});
+    // Silent on failure: offline, or no latest.json published yet. Polls every 30 min and on focus, one check at a time.
+    let busy = false;
+    const poll = () => { if (busy) return; busy = true; check().then(setUpdate).catch(() => {}).finally(() => { busy = false; }); };
     poll();
-    const t = setInterval(poll, 4 * 60 * 60 * 1000);
-    return () => clearInterval(t);
+    const t = setInterval(poll, 30 * 60 * 1000);
+    window.addEventListener("focus", poll);
+    return () => { clearInterval(t); window.removeEventListener("focus", poll); };
   }, []);
   if (!update) return null;
   const install = async () => {

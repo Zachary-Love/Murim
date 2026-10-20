@@ -55,6 +55,17 @@ pub struct Record {
     /// inferred blockers (identifiers) the user dismissed
     pub dismissed: Vec<String>,
     pub investigation: Option<Investigation>,
+    /// the user moved the card by hand
+    pub manual: Option<Manual>,
+}
+
+/// A hand-placed column, kept while Pavilion's own decision is still `from` (see `signature`); a new situation
+/// (PR merged, CI failed, agent asks) ends it, so a manual move can't hide something new.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct Manual {
+    pub column: Column,
+    pub from: String,
 }
 
 /// ~/.murim/pavilion.json, keyed by Linear issue id.
@@ -101,7 +112,6 @@ pub enum Role {
     Coder,
     Reviewer,
     Automation,
-    Meditation,
 }
 
 /// What the local model (or Claude checking it) made of an issue: the card's robot pill.
@@ -153,6 +163,11 @@ pub struct Card {
     /// the judgement behind the column, if any (inspector)
     pub verdict: Option<Verdict>,
     pub pick: Option<Pick>,
+    /// the user placed this card (Move to → Automatic undoes it)
+    pub manual: bool,
+    /// `signature` of the automatic decision, for pavilion_move
+    #[serde(skip)]
+    pub auto: String,
 }
 
 #[derive(PartialEq, Debug)]
@@ -287,6 +302,17 @@ pub fn decide(v: &IssueView) -> Decision {
     Decision { by: ready.map(|r| r.by), action: Some(Action::StartNow), ..d(Column::Queued, "ready to investigate") }
 }
 
+/// What a manual move is pinned to: the automatic column and reason.
+pub fn signature(d: &Decision) -> String {
+    format!("{:?}: {}", d.column, d.reason)
+}
+
+/// The user's column while the automatic decision is unchanged; None = no move, or it no longer applies.
+pub fn manual_decision(auto: &Decision, m: Option<&Manual>) -> Option<Decision> {
+    let m = m.filter(|m| m.from == signature(auto))?;
+    Some(Decision { action: (m.column == Column::Queued).then_some(Action::StartNow), ..d(m.column, format!("moved by you · was {}", auto.reason)) })
+}
+
 /// The robot pill: only for cards a judgement decided (or is deciding); session, PR and Linear-blocker cards get none.
 pub fn pick_of(dec: &Decision, inflight: bool, retrying: bool) -> Option<Pick> {
     if !dec.ask.is_empty() {
@@ -322,9 +348,9 @@ pub fn decide_agent(s: &SessionInfo) -> Option<Decision> {
     }
 }
 
-/// Sessions holding an agent slot: only ones actually working (idle PTYs and waiting questions don't).
+/// Sessions holding an agent slot: only ones actually working (idle PTYs and waiting questions don't); meditations are the user's own and never count.
 pub fn working(map: &HashMap<String, SessionInfo>) -> usize {
-    map.values().filter(|s| matches!(s.status, Status::Starting | Status::Working)).count()
+    map.iter().filter(|(id, s)| !sessions::is_meditation(id) && matches!(s.status, Status::Starting | Status::Working)).count()
 }
 
 /// Queued cards to start now: free slots, urgent first (Linear 1 urgent … 4 low, 0 none last), then oldest update.
@@ -396,6 +422,8 @@ struct Inner {
     thinking: Option<String>,
     /// last board summary logged; logged again only when it changes
     summary: String,
+    /// unix secs of the next scheduled tick (pokes run sooner without moving it)
+    next_run: u64,
 }
 
 #[derive(Default)]
@@ -463,6 +491,47 @@ pub fn auto_off(paused: bool, cfg: &settings::Settings) -> Option<&'static str> 
     }
 }
 
+fn memory_path() -> Option<PathBuf> {
+    store_path().map(|p| p.with_file_name("pavilion-memory.md"))
+}
+
+/// ~/.murim/pavilion-memory.md: what the orchestrator learned from being corrected (≤ judge::MEMORY_MAX chars).
+pub fn memory() -> String {
+    memory_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default()
+}
+
+/// Judgement prompts start with the memory.
+pub fn with_memory(prompt: &str) -> String {
+    match memory().trim() {
+        "" => prompt.to_string(),
+        m => format!("What you have learned about this user so far:\n{m}\n\n{prompt}"),
+    }
+}
+
+/// A correction to learn from (user override, or Claude overruling the local model): rewrite the memory on a worker,
+/// one model call at a time with judgements.
+pub fn learn(app: &AppHandle, event: String) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let _one = JUDGE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let cfg = settings::dir(&app).map(|d| settings::load(&d).pavilion).unwrap_or_default();
+        olog(format!("learning from: {event}"));
+        let old = memory();
+        match judge::rewrite_memory(&cfg, &old, &event, |p| sessions::claude_print(p, Duration::from_secs(90))) {
+            Ok(m) if m.trim() == old.trim() => olog("  memory unchanged"),
+            Ok(m) => match memory_path().map(|p| std::fs::write(p, &m)) {
+                Some(Ok(())) => olog(format!("  memory updated ({}/{} chars)", m.chars().count(), judge::MEMORY_MAX)),
+                _ => olog("  memory not saved: can't write ~/.murim/pavilion-memory.md"),
+            },
+            Err(e) => olog(format!("  memory not updated: {e}")),
+        }
+    });
+}
+
+fn card(app: &AppHandle, key: &str) -> Option<Card> {
+    pv(app).data.lock().unwrap().board.cards.iter().find(|c| c.key == key).cloned()
+}
+
 fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
@@ -496,12 +565,19 @@ pub fn load(app: &AppHandle) {
 }
 
 pub fn start(app: AppHandle) {
-    std::thread::spawn(move || loop {
-        heal(&app);
-        reconcile(&app);
-        let (m, cv) = &app.state::<Pavilion>().wake;
-        drop(cv.wait_timeout_while(m.lock().unwrap(), TICK, |woken| !*woken).unwrap().0);
-        *m.lock().unwrap() = false;
+    std::thread::spawn(move || {
+        let mut due = Instant::now();
+        loop {
+            if Instant::now() >= due {
+                due = Instant::now() + TICK;
+                pv(&app).data.lock().unwrap().next_run = now_secs() + TICK.as_secs();
+            }
+            heal(&app);
+            reconcile(&app);
+            let (m, cv) = &app.state::<Pavilion>().wake;
+            drop(cv.wait_timeout_while(m.lock().unwrap(), due.saturating_duration_since(Instant::now()), |woken| !*woken).unwrap().0);
+            *m.lock().unwrap() = false;
+        }
     });
 }
 
@@ -551,12 +627,20 @@ fn reconcile(app: &AppHandle) {
             }
         }
         let empty = Record::default();
+        let mut stale = vec![];
         for it in &inbox.items {
             let i = &it.issue;
             let rec = g.store.items.get(&i.id).unwrap_or(&empty);
             let inv = map.get(&inv_id(&i.id));
             let v = IssueView { issue: i, session: map.get(&i.id), inv, pr: prs.get(&i.id), rec, board: &board_ids };
-            let dec = decide(&v);
+            let auto = decide(&v);
+            let sig = signature(&auto);
+            let moved = manual_decision(&auto, rec.manual.as_ref());
+            if rec.manual.is_some() && moved.is_none() {
+                stale.push(i.id.clone());
+            }
+            let manual = moved.is_some();
+            let dec = moved.unwrap_or(auto); // a moved card asks no judgement: a verdict landing would undo the move
             let pick = pick_of(&dec, g.inflight.contains(&i.id), g.retry.contains_key(&i.id));
             if !dec.ask.is_empty() {
                 asks.push((i.clone(), dec.ask.clone()));
@@ -567,8 +651,15 @@ fn reconcile(app: &AppHandle) {
                 session: if v.session.is_some() { Some(i.id.clone()) } else { inv.map(|_| inv_id(&i.id)) }, plan: rec.investigation.as_ref().filter(|x| x.status == InvStatus::PlanReady).map(|x| x.plan.clone()), updated_at: i.updated_at.clone(),
                 source: Source::Issue, stage: Some(stage_of(&v)), role: role_of(&v), summary: summary_of(&i.description), url: i.url.clone(),
                 verdict: dec.by.and(if dec.action == Some(Action::DismissBlocker) { rec.blocker.clone() } else { rec.ready.clone() }),
-                pick,
+                pick, manual, auto: sig,
             });
+        }
+        for id in stale.drain(..) {
+            if let Some(r) = g.store.items.get_mut(&id) {
+                olog(format!("manual move on {id} ended: Pavilion's decision changed"));
+                r.manual = None;
+            }
+            save(&g.store);
         }
         for p in &reviews {
             let dec = decide_review(map.get(&p.session_id), crate::reviews::has_draft(p), p.requested);
@@ -584,12 +675,11 @@ fn reconcile(app: &AppHandle) {
                 cards.push(Card { key: id.clone(), column: dec.column, ident: format!("{repo}#{}", p.number), title: p.title.clone(), repo, reason, view: "pavilion".into(), target: id.clone(), pr: Some(p.clone()), session: Some(id.clone()), source: Source::Agent, role: Some(Role::Coder), url: p.url.clone(), ..Default::default() });
                 continue;
             }
-            if !(sessions::is_automation(id) || sessions::is_meditation(id)) {
+            if !sessions::is_automation(id) {
                 continue;
             }
             let Some(dec) = decide_agent(s) else { continue };
-            let view = if sessions::is_automation(id) { "automations" } else { "meditations" };
-            cards.push(Card { key: id.clone(), column: dec.column, title: s.name.clone(), reason: dec.reason, view: view.into(), target: id.clone(), session: Some(id.clone()), source: Source::Agent, role: Some(if sessions::is_automation(id) { Role::Automation } else { Role::Meditation }), ..Default::default() });
+            cards.push(Card { key: id.clone(), column: dec.column, title: s.name.clone(), reason: dec.reason, view: "automations".into(), target: id.clone(), session: Some(id.clone()), source: Source::Agent, role: Some(Role::Automation), ..Default::default() });
         }
         cards.sort_by(|a, b| (a.column, a.priority == 0, a.priority, &a.ident).cmp(&(b.column, b.priority == 0, b.priority, &b.ident)));
         let (working, max) = (working(&map), cfg.pavilion.max_agents as usize);
@@ -611,12 +701,14 @@ fn reconcile(app: &AppHandle) {
         let (thinking, judging) = (g.thinking.clone(), g.inflight.len());
         let mut board = Board { cards, working, max, paused: g.store.paused, local_offline: g.offline, updated: g.board.updated, error: inbox.error.clone(), model: cfg.pavilion.model.clone(), thinking, judging, next_run: g.board.next_run };
         let changed = board != g.board;
-        // every tick emits so the header countdown restarts; `updated` only moves on a real change
-        board.next_run = now_secs() + TICK.as_secs();
+        // `updated` only moves on a real change, not when the countdown rolls over
+        board.next_run = g.next_run;
         if changed {
             board.updated = now_secs();
         }
-        let _ = app.emit("pavilion-updated", &board);
+        if changed || board.next_run != g.board.next_run {
+            let _ = app.emit("pavilion-updated", &board);
+        }
         g.board = board;
         (start, changed)
     };
@@ -681,7 +773,12 @@ fn spawn_judge(app: &AppHandle, issue: Issue, ask: Vec<Q>, board: Vec<(String, S
         let (mut out, mut local_ok, mut failed) = (vec![], true, false);
         for q in ask {
             let allowed = judge::allowed(q, &ids, &issue.identifier);
-            let o = judge::ask(&cfg, q, &judge::prompt(q, &text, &board, &issue.identifier), &allowed, &fp, claude);
+            let o = judge::ask(&cfg, q, &with_memory(&judge::prompt(q, &text, &board, &issue.identifier)), &allowed, &fp, claude);
+            if let (Some((a, r)), Some(v)) = (&o.local, o.verdict.as_ref().filter(|v| v.by == By::Claude)) {
+                if *a != v.answer {
+                    learn(&app, format!("Asked {q:?} about {} \"{}\", you answered {a} ({r}); Claude overruled you with {}: {}", issue.identifier, issue.title, v.answer, v.reason));
+                }
+            }
             local_ok &= o.local_ok;
             for l in &o.log {
                 olog(format!("  {} {q:?}: {l}", issue.identifier));
@@ -747,6 +844,25 @@ pub fn plans_ready(app: &AppHandle) -> Vec<(String, String)> {
 }
 
 #[tauri::command]
+pub fn get_pavilion_memory() -> String {
+    memory()
+}
+
+/// Settings → Orchestrator Log: the user edits the memory directly.
+#[tauri::command]
+pub fn set_pavilion_memory(text: String) -> Result<(), String> {
+    let n = text.trim().chars().count();
+    if n > judge::MEMORY_MAX {
+        return Err(format!("{n} characters; the memory holds at most {}", judge::MEMORY_MAX));
+    }
+    let p = memory_path().ok_or("no home folder")?;
+    let _ = std::fs::create_dir_all(p.parent().unwrap());
+    std::fs::write(p, text.trim()).map_err(|e| e.to_string())?;
+    olog(format!("memory edited by the user ({n}/{} chars)", judge::MEMORY_MAX));
+    Ok(())
+}
+
+#[tauri::command]
 pub fn orchestrator_log() -> String {
     store_path().and_then(|p| std::fs::read_to_string(p.with_file_name("orchestrator.log")).ok()).map(|t| log_tail(&t, 500)).unwrap_or_default()
 }
@@ -775,8 +891,23 @@ pub fn pavilion_approve(app: AppHandle, issue_id: String, plan: String) -> Resul
     Ok(())
 }
 
+/// Move an issue card by hand; None = back to automatic.
+#[tauri::command]
+pub fn pavilion_move(app: AppHandle, issue_id: String, column: Option<Column>) -> Result<(), String> {
+    let c = card(&app, &issue_id).ok_or("That card is no longer on the board")?;
+    let from = c.auto.clone();
+    if let Some(col) = column {
+        learn(&app, format!("The user moved {} \"{}\" by hand to {col:?}; Pavilion had decided {}", c.ident, c.title, c.auto));
+    }
+    with_store(&app, |s| s.items.entry(issue_id).or_default().manual = column.map(|column| Manual { column, from }));
+    Ok(())
+}
+
 #[tauri::command]
 pub fn pavilion_dismiss_blocker(app: AppHandle, issue_id: String) {
+    if let Some(c) = card(&app, &issue_id) {
+        learn(&app, format!("The user dismissed the blocker you inferred on {} \"{}\": {}", c.ident, c.title, c.reason));
+    }
     with_store(&app, |s| {
         let r = s.items.entry(issue_id).or_default();
         if let Some(b) = r.blocker.as_ref().map(|b| b.answer.clone()) {
@@ -790,6 +921,9 @@ pub fn pavilion_dismiss_blocker(app: AppHandle, issue_id: String) {
 pub fn pavilion_start_now(app: AppHandle, issue_id: String) -> Result<(), String> {
     if settings::load(&settings::dir(&app)?).agent == AgentKind::Custom {
         return Err("Investigations need Claude Code (Settings → AI)".into());
+    }
+    if let Some(c) = card(&app, &issue_id).filter(|c| c.column == Column::NeedsYou && c.verdict.is_some()) {
+        learn(&app, format!("The user started {} \"{}\" although it was judged to need them first: {}", c.ident, c.title, c.reason));
     }
     start_investigation(&app, &issue_id)
 }
@@ -960,7 +1094,7 @@ mod tests {
         assert_eq!(keys(to_start(&cards, 2, 3)), ["urgent-old"]);
         assert!(to_start(&cards, 4, 3).is_empty());
         // only working sessions hold a slot; idle PTYs and questions don't
-        let map: HashMap<String, SessionInfo> = [("a", "working"), ("b", "starting"), ("c", "idle"), ("d", "needsInput"), ("e", "ended")].iter().map(|(k, s)| (k.to_string(), sess(k, s))).collect();
+        let map: HashMap<String, SessionInfo> = [("a", "working"), ("b", "starting"), ("c", "idle"), ("d", "needsInput"), ("e", "ended"), ("meditation:1", "working")].iter().map(|(k, s)| (k.to_string(), sess(k, s))).collect();
         assert_eq!(working(&map), 2);
     }
 
@@ -982,6 +1116,17 @@ mod tests {
         assert!(auto_off(true, &s).unwrap().starts_with("paused"));
         s.repos_root.clear();
         assert!(auto_off(false, &s).unwrap().contains("repos folder"));
+    }
+
+    #[test]
+    fn manual_move_lasts_until_the_situation_changes() {
+        let auto = d(Column::NeedsYou, "draft PR ready for review");
+        let m = Manual { column: Column::Watching, from: signature(&auto) };
+        let got = manual_decision(&auto, Some(&m)).unwrap();
+        assert_eq!((got.column, got.reason.as_str(), got.ask.is_empty()), (Column::Watching, "moved by you · was draft PR ready for review", true));
+        assert_eq!(manual_decision(&d(Column::Working, "fixing CI: build"), Some(&m)), None); // new situation: automatic again
+        assert_eq!(manual_decision(&auto, None), None);
+        assert_eq!(manual_decision(&auto, Some(&Manual { column: Column::Queued, ..m })).unwrap().action, Some(Action::StartNow));
     }
 
     #[test]

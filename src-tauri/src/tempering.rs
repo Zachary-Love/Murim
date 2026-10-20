@@ -506,7 +506,7 @@ fn triage(app: &AppHandle, id: &str, d: &PrDetail, mem: &mut Memory) -> bool {
     let allowed = judge::allowed(Q::Feedback, &[], "");
     let mut asked = false;
     for (key, thread_id, at, text) in items {
-        let o = judge::ask(&cfg, Q::Feedback, &judge::prompt(Q::Feedback, &format!("{at}\n{text}"), &[], ""), &allowed, &key, |p| sessions::claude_print(p, Duration::from_secs(90)));
+        let o = judge::ask(&cfg, Q::Feedback, &crate::pavilion::with_memory(&judge::prompt(Q::Feedback, &format!("{at}\n{text}"), &[], "")), &allowed, &key, |p| sessions::claude_print(p, Duration::from_secs(90)));
         for l in &o.log {
             crate::pavilion::olog(format!("  {id} feedback on {at}: {l}"));
         }

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { filterCards, chipCounts, reposOf, stats, prioLabel, ago, stepOf, pill, NO_FILTERS, agentStatus, PICK, pickTitle } from "../src/pavilionView.ts";
 
 const card = (o: any) => ({ key: "k", column: "watching", ident: "", title: "t", repo: "", priority: 0, reason: "", by: null, action: null, view: "tasks", target: "k",
-  pr: null, session: null, plan: null, updatedAt: "", source: "issue", stage: null, role: null, summary: "", url: "", verdict: null, ...o }) as any;
+  pr: null, session: null, plan: null, updatedAt: "", source: "issue", stage: null, role: null, summary: "", url: "", verdict: null, pick: null, manual: false, ...o }) as any;
 const cards = [
   card({ key: "a", column: "needsYou", ident: "MUR-1", title: "Auth middleware", repo: "api", action: "approvePlan", priority: 2 }),
   card({ key: "b", column: "working", ident: "MUR-2", repo: "api", role: "coder", pr: { overall: "ciFailing", number: 7 } }),

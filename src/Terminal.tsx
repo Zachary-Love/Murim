@@ -95,21 +95,27 @@ export default function Terminal({ issueId }: { issueId: string }) {
       } catch { webgl = null; }
       ro.observe(el);
       term.focus();
+      // Replay only now, at the real size: TUIs like Claude Code draw with width-relative cursor moves, so history
+      // written at xterm's default 80x24 and then reflowed comes out scrambled.
+      resize();
+      const snap = await invoke<{ data: string; end: number }>("pty_snapshot", { issueId }).catch(() => ({ data: "", end: 0 }));
+      if (dead) return;
+      await new Promise<void>((done) => term.write(bytes(snap.data), done));
+      replaying = false;
+      // live chunks the snapshot already holds would draw a frame twice ("move up N lines" twice shifts the screen)
+      pending.filter((c) => c.end > snap.end).forEach((c) => term.write(c.b));
+      ready = true;
     });
-    // Buffer live output until the snapshot is written so ordering holds (may duplicate a chunk at the seam).
+    // Buffer live output until the snapshot is written so ordering holds.
     let ready = false;
-    const pending: Uint8Array[] = [];
-    const un = listen<{ issueId: string; data: string }>("pty-output", (e) => {
+    const pending: { b: Uint8Array; end: number }[] = [];
+    const un = listen<{ issueId: string; data: string; end: number }>("pty-output", (e) => {
       if (e.payload.issueId !== issueId) return;
       const b = bytes(e.payload.data);
-      ready ? term.write(b) : pending.push(b);
+      ready ? term.write(b) : pending.push({ b, end: e.payload.end });
     });
     // Replaying history re-runs old terminal queries (device attributes, kitty keyboard); their answers are stale, drop them.
     let replaying = true;
-    invoke<string>("pty_snapshot", { issueId })
-      .then((s) => new Promise<void>((done) => term.write(bytes(s), done)))
-      .catch(() => {})
-      .finally(() => { replaying = false; ready = true; pending.forEach((b) => term.write(b)); resize(); });
     const d = term.onData((data) => { if (!replaying) send(data); });
     return () => { dead = true; window.removeEventListener("murim-appearance", onLook); ro.disconnect(); d.dispose(); un.then((f) => f()); term.dispose(); };
   }, [issueId]);

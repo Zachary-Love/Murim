@@ -9,6 +9,8 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 const RECENT_DAYS: i64 = 14;
+/// The search is the priciest GitHub call Murim makes; new PRs needing work can wait a few minutes.
+const EVERY: std::time::Duration = std::time::Duration::from_secs(300);
 
 #[derive(Debug, PartialEq)]
 pub struct Want {
@@ -51,7 +53,7 @@ fn worked_on(n: &Value) -> Option<&str> {
 }
 
 fn query() -> String {
-    format!("query($q:String!){{search(query:$q,type:ISSUE,first:50){{nodes{{... on PullRequest{{{} headRefName isCrossRepository createdAt last:commits(last:5){{nodes{{commit{{committedDate messageHeadline committer{{name}}}}}}}} repository{{name owner{{login}}}}}}}}}}}}", github::PR_FIELDS)
+    format!("query($q:String!){{search(query:$q,type:ISSUE,first:50){{nodes{{... on PullRequest{{{} headRefName isCrossRepository createdAt last:commits(last:5){{nodes{{commit{{committedDate messageHeadline committer{{name}}}}}}}} repository{{name owner{{login}}}}}}}}}}}}", github::PR_HEALTH)
 }
 
 /// Worktree on the PR's own branch at ~/.murim/worktrees/<repo>/pr-<n>, so the agent's pushes land on the PR.
@@ -83,6 +85,14 @@ pub fn run(app: &AppHandle) {
     let cfg = crate::settings::load(&dir);
     if !cfg.pavilion.auto_temper || cfg.repos_root.is_empty() || cfg.agent != crate::settings::AgentKind::Claude || crate::pavilion::is_paused(app) {
         return;
+    }
+    static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    {
+        let mut l = LAST.lock().unwrap();
+        if l.is_some_and(|t| t.elapsed() < EVERY) {
+            return;
+        }
+        *l = Some(std::time::Instant::now());
     }
     let Ok(tok) = github::token() else { return };
     let since = chrono::Utc::now() - chrono::Duration::days(RECENT_DAYS);

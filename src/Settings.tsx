@@ -4,7 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import AppearanceSettings from "./AppearanceSettings";
 import { MODE_LABEL, AgentKind, ReplyMode } from "./types";
 
-type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_temper: boolean; auto_investigate: boolean; claude_check: "always" | "lowConfidence" | "off" } };
+type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; review_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_temper: boolean; auto_investigate: boolean; claude_check: "always" | "lowConfidence" | "off" } };
 
 export const SECTIONS = ["Appearance", "Prompts", "Folders", "AI", "Pavilion", "Orchestrator Log", "Accounts"] as const;
 export type Section = typeof SECTIONS[number];
@@ -18,6 +18,34 @@ export function SettingsNav({ tab, onTab }: { tab: Section; onTab: (t: Section) 
       </ul>
     </>
   );
+}
+
+const MEMORY_MAX = 2000; // judge::MEMORY_MAX
+
+/** ~/.murim/pavilion-memory.md: lessons the orchestrator rewrites when corrected; editable here. */
+function OrchestratorMemory() {
+  const [text, setText] = useState<string | null>(null); // null = following the file
+  const [disk, setDisk] = useState("");
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    const load = () => invoke<string>("get_pavilion_memory").then(setDisk).catch(() => {});
+    load();
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, []);
+  const v = text ?? disk, n = v.trim().length;
+  const save = () => invoke("set_pavilion_memory", { text: v }).then(() => { setDisk(v.trim()); setText(null); setMsg("Saved"); }).catch((e) => setMsg(String(e)));
+  return <>
+    <label>Memory <span className={`muted ${n > MEMORY_MAX ? "warn" : ""}`}>{n} / {MEMORY_MAX}</span>
+      <textarea value={v} placeholder="Empty. Pavilion adds lessons when you correct it (move a card, investigate anyway, dismiss a blocker) or when Claude overrules the local model." onChange={(e) => { setText(e.target.value); setMsg(""); }} />
+    </label>
+    <div className="group">
+      <button className="btn" type="button" disabled={text === null || n > MEMORY_MAX} onClick={save}>Save memory</button>
+      {text !== null && <button className="btn ghost" type="button" onClick={() => { setText(null); setMsg(""); }}>Discard</button>}
+      <span className="muted">{msg}</span>
+    </div>
+    <p className="muted">Added to the top of every judgement prompt. Pavilion rewrites it itself and can never make it longer than {MEMORY_MAX} characters.</p>
+  </>;
 }
 
 /** ~/.murim/orchestrator.log, polled while open; stays pinned to the bottom unless you scroll up. */
@@ -35,6 +63,7 @@ function OrchestratorLog() {
     return () => clearInterval(t);
   }, []);
   return <>
+    <OrchestratorMemory />
     <p className="muted">What Pavilion's local model and Claude decided, and why Pavilion did or didn't start agents. Also in <code>~/.murim/orchestrator.log</code>.</p>
     <pre ref={pre} className="olog">{text || "Nothing logged yet. Entries appear on the next board check (every minute) or judgement."}</pre>
   </>;
@@ -194,6 +223,11 @@ export default function Settings({ tab }: { tab: Section }) {
       {tab === "Prompts" && (
       <label>Default prompt
         <textarea value={s.default_prompt} placeholder="Appended to every task prompt, e.g. run the tests before finishing" onChange={(e) => setS({ ...s, default_prompt: e.target.value })} />
+      </label>
+      )}
+      {tab === "Prompts" && (
+      <label>Review prompt
+        <textarea value={s.review_prompt} placeholder="Appended to every review agent's prompt, e.g. focus on security and tests" onChange={(e) => setS({ ...s, review_prompt: e.target.value })} />
       </label>
       )}
       {tab === "Appearance" && <AppearanceSettings />}

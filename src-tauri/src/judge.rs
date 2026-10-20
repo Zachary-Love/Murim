@@ -86,8 +86,8 @@ fn schema(allowed: &[String]) -> Value {
 }
 
 /// Ollama /api/chat with structured output; returns the message content.
-fn ollama(url: &str, model: &str, prompt: &str, allowed: &[String]) -> Result<String, String> {
-    let body = json!({"model": model, "messages": [{"role": "user", "content": prompt}], "stream": false, "format": schema(allowed), "options": {"temperature": 0}});
+fn ollama(url: &str, model: &str, prompt: &str, format: Value) -> Result<String, String> {
+    let body = json!({"model": model, "messages": [{"role": "user", "content": prompt}], "stream": false, "format": format, "options": {"temperature": 0}});
     let res = match ureq::post(&format!("{}/api/chat", url.trim_end_matches('/'))).timeout(Duration::from_secs(60)).send_json(body) {
         Ok(r) => r,
         Err(ureq::Error::Status(_, r)) => return Err(format!("Ollama: {}", r.into_string().unwrap_or_default().trim())), // e.g. model not pulled
@@ -104,6 +104,8 @@ pub struct Outcome {
     pub local_ok: bool,
     /// what each model said, for the orchestrator log
     pub log: Vec<String>,
+    /// the local model's (answer, reason), when it gave one: a Claude answer that differs is a lesson
+    pub local: Option<(String, String)>,
 }
 
 fn said((a, r, c): &(String, String, f32)) -> String {
@@ -112,9 +114,10 @@ fn said((a, r, c): &(String, String, f32)) -> String {
 
 /// Local answer first; Claude checks when the policy says so, or answers alone when the local model failed.
 pub fn ask(cfg: &PavilionSettings, q: Q, prompt: &str, allowed: &[String], fp: &str, claude: impl Fn(&str) -> Option<String>) -> Outcome {
-    let raw = ollama(&cfg.ollama_url, &cfg.model, prompt, allowed);
+    let raw = ollama(&cfg.ollama_url, &cfg.model, prompt, schema(allowed));
     let local = raw.as_ref().ok().and_then(|r| parse(r, allowed));
     let local_ok = local.is_some();
+    let said_local = local.as_ref().map(|l| (l.0.clone(), l.1.clone()));
     let mut log = vec![match (&raw, &local) {
         (_, Some(l)) => format!("{}: {}", cfg.model, said(l)),
         (Ok(r), None) => format!("{}: unusable reply: {}", cfg.model, r.chars().take(200).collect::<String>()),
@@ -122,20 +125,51 @@ pub fn ask(cfg: &PavilionSettings, q: Q, prompt: &str, allowed: &[String], fp: &
     }];
     let v = |(answer, reason, confidence): (String, String, f32), by| Verdict { answer, reason, confidence, by, fingerprint: fp.to_string() };
     match local {
-        Some(l) if !needs_check(cfg.claude_check, q, &l.0, l.2) => Outcome { verdict: Some(v(l, By::Local)), local_ok, log },
+        Some(l) if !needs_check(cfg.claude_check, q, &l.0, l.2) => Outcome { verdict: Some(v(l, By::Local)), local_ok, log, local: said_local },
         l => {
             let note = l.map(|(a, r, c)| format!("\n\nA small local model answered: {}", json!({"answer": a, "reason": r, "confidence": c}))).unwrap_or_default();
             let checked = claude(&format!("{prompt}{note}\n\nGive your own answer in the same JSON format.")).and_then(|r| parse(&r, allowed));
             log.push(checked.as_ref().map_or("claude: no usable answer (failed, timed out or bad JSON)".into(), |c| format!("claude: {}", said(c))));
-            Outcome { verdict: checked.map(|c| v(c, By::Claude)), local_ok, log }
+            Outcome { verdict: checked.map(|c| v(c, By::Claude)), local_ok, log, local: said_local }
         }
     }
+}
+
+/// Pavilion's memory (Hermes-style): a small file the model rewrites when it's corrected, hard-capped in characters.
+pub const MEMORY_MAX: usize = 2000;
+
+pub fn memory_prompt(current: &str, event: &str, over: Option<usize>) -> String {
+    let retry = over.map(|n| format!("\n\nYour last rewrite was {n} characters; it must be at most {MEMORY_MAX}. Merge or drop the least useful lessons.")).unwrap_or_default();
+    let current = if current.trim().is_empty() { "(empty)" } else { current.trim() };
+    format!("You keep a small memory that helps you triage this user's software issues and code review feedback. Something just happened that may teach you how this user works. Rewrite the memory: keep durable, general lessons (their preferences, recurring patterns, what they consider ready, blocked or needing them), merge duplicates, drop one-off details and anything the event contradicts. If it teaches nothing new, return the memory unchanged. Short markdown bullets, at most {MEMORY_MAX} characters.{retry}\nReply with only a JSON object: {{\"memory\": <the whole new memory>}}.\n\nCurrent memory:\n{current}\n\nWhat happened:\n{event}")
+}
+
+pub fn parse_memory(raw: &str) -> Option<String> {
+    let (a, b) = (raw.find('{')?, raw.rfind('}')?);
+    let v: Value = serde_json::from_str(raw.get(a..=b)?).ok()?;
+    v["memory"].as_str().map(|m| m.trim().to_string())
+}
+
+/// The rewritten memory: local model first, Claude when it fails; one retry when over the cap. Err keeps the old one.
+pub fn rewrite_memory(cfg: &PavilionSettings, current: &str, event: &str, claude: impl Fn(&str) -> Option<String>) -> Result<String, String> {
+    let format = json!({"type": "object", "properties": {"memory": {"type": "string"}}, "required": ["memory"]});
+    let mut over = None;
+    for _ in 0..2 {
+        let p = memory_prompt(current, event, over);
+        let m = ollama(&cfg.ollama_url, &cfg.model, &p, format.clone()).ok().and_then(|r| parse_memory(&r)).or_else(|| claude(&p).and_then(|r| parse_memory(&r))).ok_or("neither the local model nor Claude answered")?;
+        let n = m.chars().count();
+        if n <= MEMORY_MAX {
+            return Ok(m);
+        }
+        over = Some(n);
+    }
+    Err(format!("the rewrite was still over {MEMORY_MAX} characters"))
 }
 
 /// Settings → Test: one tiny structured call.
 pub fn test_model(url: &str, model: &str) -> Result<String, String> {
     let ok = vec!["ok".to_string()];
-    let r = ollama(url, model, r#"Reply with the JSON {"answer": "ok", "reason": "test", "confidence": 1}."#, &ok)?;
+    let r = ollama(url, model, r#"Reply with the JSON {"answer": "ok", "reason": "test", "confidence": 1}."#, schema(&ok))?;
     parse(&r, &ok).map(|_| format!("{model} answered")).ok_or(format!("Unexpected reply from {model}: {r}"))
 }
 
@@ -238,6 +272,21 @@ mod tests {
         let bad = stub(r#"{"message": {"content": "sure! ready"}}"#);
         let o = ask(&cfg(&bad, CheckMode::Off), Q::Ready, "p", &a, "fp", |_| None);
         assert!(!o.local_ok && o.verdict.is_none());
+    }
+
+    #[test]
+    fn memory_rewrite_is_capped() {
+        assert!(memory_prompt("", "moved MUR-1", None).contains("Current memory:\n(empty)"));
+        assert!(memory_prompt("- a", "e", Some(2400)).contains("was 2400 characters"));
+        assert_eq!(parse_memory("ok {\"memory\": \" - likes small PRs \"}").as_deref(), Some("- likes small PRs"));
+        let ok = stub(r#"{"message": {"content": "{\"memory\": \"- bugs with repro steps are ready\"}"}}"#);
+        assert_eq!(rewrite_memory(&cfg(&ok, CheckMode::Off), "", "e", |_| panic!("local answered")).unwrap(), "- bugs with repro steps are ready");
+        // local model down: Claude rewrites; too long twice: keep the old memory
+        assert_eq!(rewrite_memory(&cfg(DOWN, CheckMode::Off), "", "e", |_| Some(r#"{"memory": "- x"}"#.into())).unwrap(), "- x");
+        let long = format!(r#"{{"memory": "{}"}}"#, "x".repeat(MEMORY_MAX + 1));
+        let calls = std::cell::Cell::new(0);
+        assert!(rewrite_memory(&cfg(DOWN, CheckMode::Off), "", "e", |p| { calls.set(calls.get() + 1); assert_eq!(calls.get() == 2, p.contains("characters; it must be")); Some(long.clone()) }).is_err());
+        assert_eq!(calls.get(), 2);
     }
 
     #[test]

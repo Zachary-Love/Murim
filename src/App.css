@@ -467,4 +467,6 @@ button.chip:hover { background: var(--hover); border-color: var(--line-hi); colo
 .pv-mini .pv-pick { align-self: flex-start; }
 .pv-pick.thinking svg, .pv-agent.thinking svg { animation: pulse 1.2s ease-in-out infinite; }
 .pv-agent { font-variant-numeric: tabular-nums; }
-.olog { margin: 0; height: calc(100vh - 170px); overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font: 11px/1.55 var(--mono); color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
+.olog { margin: 0; height: max(280px, calc(100vh - 520px)); overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font: 11px/1.55 var(--mono); color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
+.pvi-move { display: flex; align-items: center; gap: 8px; }
+.pvi-move select { height: 24px; font-size: 11px; padding: 0 6px; }
