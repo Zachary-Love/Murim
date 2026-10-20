@@ -1,5 +1,5 @@
 //! Tempering: pure decision rules over a richer PR fetch + the runner that executes them.
-use crate::github::{self, Overall, PrHealth, PrState};
+use crate::github::{self, Ci, Overall, PrHealth, PrState};
 use crate::hooks::Status;
 use crate::sessions;
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,8 @@ use tauri::{AppHandle, Emitter};
 
 const MAX_INVOKES: u32 = 3;
 const LOG_LINES: usize = 80;
+/// after a Tempering turn dies on an API error (rate limit, overloaded…), wait this long before retrying
+const RETRY_SECS: u64 = 600;
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug, Default)]
 #[serde(rename_all = "camelCase")]
@@ -58,6 +60,10 @@ pub struct Memory {
     pub rerun: HashSet<String>,
     pub escalated: HashSet<Kind>,
     pub ready: bool,
+    /// what the running Tempering turn is fixing, so a turn that dies on an API error can be retried
+    pub inflight: Vec<(Kind, Vec<String>)>,
+    /// unix secs: no new Tempering turns before this
+    pub retry_at: u64,
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -186,6 +192,13 @@ pub fn decide(d: &PrDetail, h: &PrHealth, m: &mut Memory) -> Vec<Action> {
     let mut out = vec![];
     if h.state != PrState::Open {
         return out;
+    }
+    // the attempt cap is per failure streak: green CI / a clean merge starts the count over
+    for (kind, clear) in [(Kind::Ci, h.ci == Ci::Passing), (Kind::Conflict, !h.conflict)] {
+        if clear {
+            m.attempts.remove(&kind);
+            m.escalated.remove(&kind);
+        }
     }
     // CI: rerun once per (sha, check), then invoke for what still fails
     let (mut ci_keys, mut ci_logs) = (vec![], vec![]);
@@ -362,7 +375,7 @@ pub fn run(app: &AppHandle, id: &str, d: &PrDetail, h: &PrHealth) {
     details().lock().unwrap().insert(id.into(), d.clone());
     consume(app, id);
     let Some((on, wt, status, mut mem, title)) = sessions::with_session(app, id, |s| (s.tempering, s.worktree.clone(), s.status, s.memory.clone(), sessions::title_of(s))) else { return };
-    if !on || !matches!(status, Status::Idle | Status::Ended) {
+    if !on || !matches!(status, Status::Idle | Status::Ended) || now() < mem.retry_at {
         return;
     }
     if triage(app, id, d, &mut mem) {
@@ -406,23 +419,46 @@ pub fn run(app: &AppHandle, id: &str, d: &PrDetail, h: &PrHealth) {
             prompts.push(format!("Failed log tail for {name} (last {LOG_LINES} lines):\n{t}"));
         }
         let _ = std::fs::create_dir_all(Path::new(&wt).join(".murim"));
-        let note = note(&invokes);
+        // memory is saved before the turn starts: its hooks (Stop/StopFailure) may arrive any time after
+        mem.inflight = invokes;
+        let note = note(&mem.inflight);
         sessions::with_session(app, id, |s| {
             s.tempering_turn = true;
             s.tempering_note = note;
+            s.memory = mem;
         });
         if let Err(e) = sessions::resume_task(app.clone(), id.into(), Some(prompts.join("\n\n"))) {
-            sessions::with_session(app, id, |s| s.tempering_turn = false);
-            for (kind, keys) in invokes {
-                for k in keys {
-                    mem.handled.remove(&k);
-                }
-                *mem.attempts.entry(kind).or_default() -= 1;
-            }
+            sessions::with_session(app, id, |s| {
+                s.tempering_turn = false;
+                rollback(&mut s.memory);
+            });
             log(app, id, format!("Could not reach Claude: {e}"));
         }
+        return;
     }
     sessions::with_session(app, id, |s| s.memory = mem);
+}
+
+fn now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+/// Un-mark what the Tempering turn was fixing so a later poll invokes it again.
+pub fn rollback(m: &mut Memory) {
+    for (kind, keys) in std::mem::take(&mut m.inflight) {
+        for k in keys {
+            m.handled.remove(&k);
+        }
+        if let Some(n) = m.attempts.get_mut(&kind) {
+            *n = n.saturating_sub(1);
+        }
+    }
+}
+
+/// A Tempering turn ended on an API error (StopFailure): retry the same work after RETRY_SECS.
+pub fn turn_failed(m: &mut Memory) {
+    rollback(m);
+    m.retry_at = now() + RETRY_SECS;
 }
 
 /// Pavilion's card while a Tempering turn runs.
@@ -654,6 +690,34 @@ mod tests {
         assert!(decide(&d, &h, &mut m).is_empty());
         // other kinds are unaffected
         assert!(m.escalated.contains(&Kind::Thread) && !m.escalated.contains(&Kind::Ci));
+    }
+
+    #[test]
+    fn ci_cap_resets_when_ci_goes_green() {
+        let mut m = Memory::default();
+        for sha in ["a", "b", "c"] {
+            decide(&failing(sha), &red(), &mut m); // rerun
+            assert_eq!(invokes(&decide(&failing(sha), &red(), &mut m)), 1);
+        }
+        decide(&failing("d"), &red(), &mut m);
+        assert_eq!(decide(&failing("d"), &red(), &mut m), vec![Action::Escalate(Kind::Ci)]);
+        decide(&PrDetail::default(), &health(|_| {}), &mut m); // green
+        decide(&failing("e"), &red(), &mut m);
+        assert_eq!(invokes(&decide(&failing("e"), &red(), &mut m)), 1);
+    }
+
+    #[test]
+    fn failed_turn_is_retried() {
+        let (d, mut m) = (failing("s"), Memory::default());
+        decide(&d, &red(), &mut m);
+        for a in decide(&d, &red(), &mut m) {
+            if let Action::Invoke { kind, keys, .. } = a {
+                m.inflight.push((kind, keys));
+            }
+        }
+        turn_failed(&mut m);
+        assert!(m.retry_at > now() && m.inflight.is_empty() && m.attempts[&Kind::Ci] == 0);
+        assert_eq!(invokes(&decide(&d, &red(), &mut m)), 1); // same sha/check invoked again
     }
 
     #[test]

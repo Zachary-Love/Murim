@@ -228,6 +228,10 @@ pub fn changes_prompt(feedback: &str) -> String {
 
 pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
     let stop = ev["hook_event_name"] == "Stop";
+    // the turn died on an API error (rate limit, overloaded, auth…): Claude Code sends this instead of Stop
+    let failed = ev["hook_event_name"] == "StopFailure";
+    let error = ev["error"].as_str().unwrap_or("unknown").to_string();
+    let mut retry = false;
     let med = agent_only(task);
     let has_pr = stop && !med && crate::github::get_prs(app.state()).prs.contains_key(task);
     let (mut quality, mut ready, mut picked) = (None, None, None);
@@ -248,8 +252,18 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
             if picked.is_none() {
                 st = Status::NeedsInput;
             }
+        } else if failed {
+            retry = std::mem::take(&mut s.tempering_turn);
+            if retry {
+                crate::tempering::turn_failed(&mut s.memory);
+            } else {
+                st = Status::NeedsInput;
+            }
         } else if stop && !med {
             let tt = std::mem::take(&mut s.tempering_turn);
+            if tt {
+                s.memory.inflight.clear();
+            }
             match hooks::on_stop(s.pr_flow, ev["last_assistant_message"].as_str().unwrap_or_default(), has_pr, tt) {
                 StopOutcome::Idle => {}
                 StopOutcome::NeedsInput => st = Status::NeedsInput,
@@ -270,12 +284,15 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
             s.questions = q; // permission_prompt after AskUserQuestion keeps the question
         }
         (st == Status::NeedsInput && was != Status::NeedsInput).then(|| {
-            let text = if stop { "Claude stopped — reply needed?" } else { s.questions.as_ref().and_then(|q| q[0]["question"].as_str()).or(ev["message"].as_str()).unwrap_or("Needs your input") };
-            (if is_automation(&s.issue_id) { format!("{} needs you", s.name) } else { title_of(s) }, text.to_string())
+            let text = if failed { format!("Claude stopped on an API error ({error})") } else if stop { "Claude stopped — reply needed?".into() } else { s.questions.as_ref().and_then(|q| q[0]["question"].as_str()).or(ev["message"].as_str()).unwrap_or("Needs your input").to_string() };
+            (if is_automation(&s.issue_id) { format!("{} needs you", s.name) } else { title_of(s) }, text)
         })
     });
     if let Some((t, b)) = note {
         notify(app, t, b);
+    }
+    if retry {
+        crate::tempering::log(app, task, format!("Claude hit an API error ({error}); Tempering retries in 10 min"));
     }
     if let Some(t) = ready {
         notify(app, t, "Draft PR ready for your review".into());
@@ -428,7 +445,7 @@ fn ensure_worktree(home: &Path, repo: &Path, ident: &str, branch: &str) -> Resul
 }
 
 const HOOK_CMD: &str = r#"curl -s -m 5 -X POST http://127.0.0.1:$MURIM_PORT/hook -H "X-Murim-Token: $MURIM_TOKEN" -H "X-Murim-Task: $MURIM_TASK" --data-binary @- || true"#;
-const EVENTS: [&str; 6] = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop", "SessionEnd"];
+const EVENTS: [&str; 7] = ["UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop", "StopFailure", "SessionEnd"];
 
 /// Merge our hooks into an existing settings.local.json value, replacing earlier Murim entries
 /// and keeping everything else.
@@ -907,7 +924,7 @@ mod tests {
         assert_eq!(twice["hooks"]["Stop"].as_array().unwrap().len(), 2);
         assert_eq!(twice["hooks"]["Stop"][0]["hooks"][0]["command"], "echo mine");
         assert_eq!(twice["hooks"]["SessionEnd"].as_array().unwrap().len(), 1);
-        assert_eq!(merge_hooks(json!("junk"))["hooks"].as_object().unwrap().len(), 6);
+        assert_eq!(merge_hooks(json!("junk"))["hooks"].as_object().unwrap().len(), 7);
     }
 
     #[test]

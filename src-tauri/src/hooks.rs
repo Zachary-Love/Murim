@@ -91,7 +91,7 @@ pub fn next_status(cur: Status, ev: &Value) -> (Status, Option<Value>) {
             Some("idle_prompt") if cur != Status::Idle => (Status::NeedsInput, None),
             _ => (cur, None),
         },
-        "Stop" => (Status::Idle, None),
+        "Stop" | "StopFailure" => (Status::Idle, None), // StopFailure: the turn died on an API error
         "SessionEnd" => (Status::Ended, None),
         _ => (cur, None),
     }
@@ -156,6 +156,7 @@ mod tests {
         assert_eq!(n(Idle, json!({"hook_event_name":"Notification","notification_type":"idle_prompt"})).0, Idle);
         assert_eq!(n(Working, json!({"hook_event_name":"Notification","notification_type":"auth_success"})).0, Working);
         assert_eq!(n(Working, json!({"hook_event_name":"Stop"})).0, Idle);
+        assert_eq!(n(Working, json!({"hook_event_name":"StopFailure","error":"rate_limit"})).0, Idle);
         assert_eq!(n(Idle, json!({"hook_event_name":"SessionEnd"})).0, Ended);
         assert_eq!(n(Idle, json!({"foo":1})).0, Idle);
     }
