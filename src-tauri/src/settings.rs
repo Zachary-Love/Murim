@@ -105,11 +105,13 @@ pub struct PavilionSettings {
     pub auto_temper: bool,
     pub auto_investigate: bool,
     pub claude_check: CheckMode,
+    /// the orchestrator approves an investigation's plan itself (and coding starts) when it's at least this sure; 0 = always ask
+    pub auto_approve_at: f32,
 }
 
 impl Default for PavilionSettings {
     fn default() -> Self {
-        Self { local_model: true, ollama_url: "http://localhost:11434".into(), model: "qwen3:4b".into(), max_agents: 10, docker_slots: 2, auto_temper: true, auto_investigate: true, claude_check: CheckMode::Always }
+        Self { local_model: true, ollama_url: "http://localhost:11434".into(), model: "qwen3:4b".into(), max_agents: 10, docker_slots: 2, auto_temper: true, auto_investigate: true, claude_check: CheckMode::Always, auto_approve_at: 0.75 }
     }
 }
 
@@ -212,7 +214,7 @@ mod tests {
     fn pavilion_defaults_and_partial() {
         let p = PavilionSettings::default();
         assert_eq!((p.ollama_url.as_str(), p.model.as_str(), p.max_agents, p.docker_slots, p.auto_investigate, p.claude_check), ("http://localhost:11434", "qwen3:4b", 10, 2, true, CheckMode::Always));
-        assert!(p.auto_temper && p.local_model);
+        assert!(p.auto_temper && p.local_model && p.auto_approve_at == 0.75);
         let s: Settings = serde_json::from_str(r#"{"pavilion": {"max_agents": 2, "claude_check": "lowConfidence"}}"#).unwrap();
         assert_eq!((s.pavilion.max_agents, s.pavilion.claude_check, s.pavilion.model.as_str()), (2, CheckMode::LowConfidence, "qwen3:4b"));
     }

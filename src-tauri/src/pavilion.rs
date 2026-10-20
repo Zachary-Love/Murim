@@ -55,6 +55,8 @@ pub struct Record {
     /// inferred blockers (identifiers) the user dismissed
     pub dismissed: Vec<String>,
     pub investigation: Option<Investigation>,
+    /// the orchestrator's check of the plan (fingerprint = plan_fp)
+    pub plan_check: Option<Verdict>,
     /// the user moved the card by hand
     pub manual: Option<Manual>,
 }
@@ -192,6 +194,8 @@ pub struct Decision {
     pub action: Option<Action>,
     /// judgement questions without a fresh verdict
     pub ask: Vec<Q>,
+    /// the orchestrator approved the plan itself: start coding now
+    pub approve: bool,
 }
 
 pub struct IssueView<'a> {
@@ -203,10 +207,12 @@ pub struct IssueView<'a> {
     pub rec: &'a Record,
     /// identifiers of the issues on the board (valid inferred blockers)
     pub board: &'a HashSet<String>,
+    /// Settings → auto-approve plans at this confidence; None = always ask
+    pub auto_at: Option<f32>,
 }
 
 fn d(column: Column, reason: impl Into<String>) -> Decision {
-    Decision { column, reason: reason.into(), by: None, action: None, ask: vec![] }
+    Decision { column, reason: reason.into(), by: None, action: None, ask: vec![], approve: false }
 }
 
 fn live(s: Option<&SessionInfo>) -> bool {
@@ -220,11 +226,20 @@ fn asks(s: &SessionInfo) -> String {
 /// FNV-1a over what the judgement reads; stable across builds (DefaultHasher isn't). ponytail: Linear's updatedAt is
 /// assumed to move on comments; if it doesn't, a new comment alone won't trigger a re-judge.
 pub fn fingerprint(i: &Issue) -> String {
+    fnv(&[i.updated_at.as_str(), &i.title, &i.description].join("\u{1f}"))
+}
+
+fn fnv(s: &str) -> String {
     let mut h: u64 = 0xcbf29ce484222325;
-    for b in [i.updated_at.as_str(), &i.title, &i.description].join("\u{1f}").bytes() {
+    for b in s.bytes() {
         h = (h ^ b as u64).wrapping_mul(0x100000001b3);
     }
     format!("{h:016x}")
+}
+
+/// What a plan check answers: the issue and the plan as written (an edited plan is checked again).
+pub fn plan_fp(issue_fp: &str, plan: &str) -> String {
+    fnv(&format!("{issue_fp}\u{1f}{plan}"))
 }
 
 pub fn inv_id(issue_id: &str) -> String {
@@ -280,7 +295,7 @@ pub fn decide(v: &IssueView) -> Decision {
         return d(Column::NeedsYou, format!("investigation {}", asks(s)));
     }
     match v.rec.investigation.as_ref().filter(|_| v.session.is_none()).map(|i| i.status) {
-        Some(InvStatus::PlanReady) => return Decision { action: Some(Action::ApprovePlan), ..d(Column::NeedsYou, "plan ready") },
+        Some(InvStatus::PlanReady) => return decide_plan(v, &fp),
         Some(InvStatus::Failed) => return d(Column::NeedsYou, "investigation ended without a plan"),
         Some(InvStatus::Running) if v.inv.map_or(true, |s| s.status == Status::Ended) => return d(Column::NeedsYou, "investigation ended without a plan"),
         Some(InvStatus::Running) => return d(Column::Working, "investigating"),
@@ -364,6 +379,20 @@ pub fn olog_once(msg: String) {
     static SEEN: Mutex<Option<HashSet<String>>> = Mutex::new(None);
     if SEEN.lock().unwrap().get_or_insert_with(HashSet::new).insert(msg.clone()) {
         olog(msg);
+    }
+}
+
+/// A finished plan: the orchestrator checks it, and approves it itself when sure enough; otherwise it's the user's.
+fn decide_plan(v: &IssueView, fp: &str) -> Decision {
+    let plan = v.rec.investigation.as_ref().map_or("", |i| i.plan.as_str());
+    let yours = |reason: String, by| Decision { action: Some(Action::ApprovePlan), by, ..d(Column::NeedsYou, reason) };
+    let Some(at) = v.auto_at else { return yours("plan ready".into(), None) };
+    let pct = |c: f32| (c * 100.0).round();
+    match v.rec.plan_check.as_ref().filter(|c| c.fingerprint == plan_fp(fp, plan)) {
+        None => Decision { ask: vec![Q::Plan], ..yours("plan ready · orchestrator is checking it".into(), None) },
+        Some(c) if c.answer == "approve" && c.confidence >= at => Decision { approve: true, by: Some(c.by), ..d(Column::Working, format!("plan approved by the orchestrator ({}% sure): {}", pct(c.confidence), c.reason)) },
+        Some(c) if c.answer == "approve" => yours(format!("plan ready · orchestrator would approve but is only {}% sure: {}", pct(c.confidence), c.reason), Some(c.by)),
+        Some(c) => yours(format!("plan ready · orchestrator wants your review ({}% sure): {}", pct(c.confidence), c.reason), Some(c.by)),
     }
 }
 
@@ -657,7 +686,7 @@ fn reconcile(app: &AppHandle) {
     let map = app.state::<sessions::Sessions>().snapshot();
     let board_ids: HashSet<String> = inbox.items.iter().map(|it| it.issue.identifier.clone()).collect();
     let titles: Vec<(String, String)> = inbox.items.iter().map(|it| (it.issue.identifier.clone(), it.issue.title.clone())).collect();
-    let (mut cards, mut asks) = (vec![], vec![]);
+    let (mut cards, mut asks, mut approvals) = (vec![], vec![], vec![]);
     let (start, changed) = {
         let mut g = pv(app).data.lock().unwrap();
         if inbox.error.is_none() && !inbox.items.is_empty() {
@@ -674,7 +703,8 @@ fn reconcile(app: &AppHandle) {
             let i = &it.issue;
             let rec = g.store.items.get(&i.id).unwrap_or(&empty);
             let inv = map.get(&inv_id(&i.id));
-            let v = IssueView { issue: i, session: map.get(&i.id), inv, pr: prs.get(&i.id), rec, board: &board_ids };
+            let auto_at = (cfg.pavilion.auto_approve_at > 0.0).then_some(cfg.pavilion.auto_approve_at);
+            let v = IssueView { issue: i, session: map.get(&i.id), inv, pr: prs.get(&i.id), rec, board: &board_ids, auto_at };
             let auto = decide(&v);
             let sig = signature(&auto);
             let moved = manual_decision(&auto, rec.manual.as_ref());
@@ -687,12 +717,16 @@ fn reconcile(app: &AppHandle) {
             if !dec.ask.is_empty() {
                 asks.push((i.clone(), dec.ask.clone()));
             }
+            if dec.approve {
+                approvals.push((i.id.clone(), i.identifier.clone(), rec.investigation.as_ref().map(|x| x.plan.clone()).unwrap_or_default()));
+            }
+            let plan_stage = rec.investigation.as_ref().is_some_and(|x| x.status == InvStatus::PlanReady);
             cards.push(Card {
                 key: i.id.clone(), column: dec.column, ident: i.identifier.clone(), title: i.title.clone(), repo: it.repo.as_ref().map(|r| repo_name(&r.path)).unwrap_or_default(),
                 priority: i.priority, reason: dec.reason, by: dec.by, action: dec.action, view: "tasks".into(), target: i.id.clone(), pr: prs.get(&i.id).cloned(),
                 session: if v.session.is_some() { Some(i.id.clone()) } else { inv.map(|_| inv_id(&i.id)) }, plan: rec.investigation.as_ref().filter(|x| x.status == InvStatus::PlanReady).map(|x| x.plan.clone()), updated_at: i.updated_at.clone(),
                 source: Source::Issue, stage: Some(stage_of(&v)), role: role_of(&v), summary: summary_of(&i.description), url: i.url.clone(),
-                verdict: dec.by.and(if dec.action == Some(Action::DismissBlocker) { rec.blocker.clone() } else { rec.ready.clone() }),
+                verdict: dec.by.and(if dec.action == Some(Action::DismissBlocker) { rec.blocker.clone() } else if plan_stage { rec.plan_check.clone() } else { rec.ready.clone() }),
                 pick, manual, auto: sig,
             });
         }
@@ -789,6 +823,13 @@ fn reconcile(app: &AppHandle) {
             sessions::notify(app, "Pavilion".into(), format!("Could not start an investigation: {e}"));
         }
     }
+    // ponytail: approvals don't wait for a slot: the investigation that wrote the plan just gave its slot back
+    for (id, ident, plan) in approvals {
+        olog_once(format!("{ident}: orchestrator approved the plan; starting the coding agent"));
+        if let Err(e) = pavilion_approve(app.clone(), id, plan) {
+            olog_once(format!("{ident}: could not start the coding agent: {e}")); // retried every tick
+        }
+    }
     for (issue, ask) in asks {
         spawn_judge(app, issue, ask, titles.clone());
     }
@@ -834,13 +875,16 @@ fn spawn_judge(app: &AppHandle, issue: Issue, ask: Vec<Q>, board: Vec<(String, S
         let cfg = settings::dir(&app).map(|d| settings::load(&d).pavilion).unwrap_or_default();
         let comments = crate::linear::api_key().and_then(|k| crate::linear::recent_comments(&k, &issue.id, 10)).unwrap_or_default();
         let text = issue_text(&issue, &comments);
+        // a plan check reads the plan as it is now (the user may have edited it)
+        let plan = pv(&app).data.lock().unwrap().store.items.get(&issue.id).and_then(|r| r.investigation.clone()).map(|i| i.plan).unwrap_or_default();
         let ids: Vec<String> = board.iter().map(|b| b.0.clone()).collect();
         olog(format!("judging {} ({:?}) with {}", issue.identifier, ask, judge::model_name(&cfg)));
         let claude = |p: &str| sessions::claude_print(p, Duration::from_secs(90));
         let (mut out, mut local_ok, mut failed) = (vec![], true, false);
         for q in ask {
             let allowed = judge::allowed(q, &ids, &issue.identifier);
-            let o = judge::ask(&cfg, q, &with_memory(&judge::prompt(q, &text, &board, &issue.identifier)), &allowed, &fp, claude);
+            let (input, qfp) = if q == Q::Plan { (format!("Issue:\n{text}\n\nPlan:\n{plan}"), plan_fp(&fp, &plan)) } else { (text.clone(), fp.clone()) };
+            let o = judge::ask(&cfg, q, &with_memory(&judge::prompt(q, &input, &board, &issue.identifier)), &allowed, &qfp, claude);
             if let (Some((a, r)), Some(v)) = (&o.local, o.verdict.as_ref().filter(|v| v.by == By::Claude)) {
                 if *a != v.answer {
                     learn(&app, format!("Asked {q:?} about {} \"{}\", you answered {a} ({r}); Claude overruled you with {}: {}", issue.identifier, issue.title, v.answer, v.reason));
@@ -871,6 +915,7 @@ fn spawn_judge(app: &AppHandle, issue: Issue, ask: Vec<Q>, board: Vec<(String, S
                 match q {
                     Q::Ready => r.ready = Some(v),
                     Q::Blocker => r.blocker = Some(v),
+                    Q::Plan => r.plan_check = Some(v),
                     Q::Feedback => {} // asked by tempering::triage, never from here
                 }
             }
@@ -947,6 +992,9 @@ pub fn pavilion_approve(app: AppHandle, issue_id: String, plan: String) -> Resul
     }
     if sessions::pty_alive(&app, &issue_id) {
         return Ok(());
+    }
+    if let Some(c) = card(&app, &issue_id).filter(|c| c.action == Some(Action::ApprovePlan) && c.verdict.as_ref().is_some_and(|v| v.answer == "ask")) {
+        learn(&app, format!("The user approved the plan for {} \"{}\" although you wanted them to review it: {}", c.ident, c.title, c.reason));
     }
     set_investigation(&app, &issue_id, InvStatus::Approved, plan.clone());
     let mode = settings::load(&settings::dir(&app)?).default_permission_mode;
@@ -1043,10 +1091,10 @@ mod tests {
     }
     fn run(i: &Issue, session: Option<&SessionInfo>, inv: Option<&SessionInfo>, pr: Option<&PrHealth>, rec: &Record) -> Decision {
         let board: HashSet<String> = ["MUR-1".to_string(), "MUR-2".to_string()].into();
-        decide(&IssueView { issue: i, session, inv, pr, rec, board: &board })
+        decide(&IssueView { issue: i, session, inv, pr, rec, board: &board, auto_at: None })
     }
     fn view<'a>(i: &'a Issue, board: &'a HashSet<String>, session: Option<&'a SessionInfo>, inv: Option<&'a SessionInfo>, pr: Option<&'a PrHealth>, rec: &'a Record) -> IssueView<'a> {
-        IssueView { issue: i, session, inv, pr, rec, board }
+        IssueView { issue: i, session, inv, pr, rec, board, auto_at: None }
     }
     fn col(d: &Decision) -> (Column, &str) {
         (d.column, d.reason.as_str())
@@ -1090,6 +1138,25 @@ mod tests {
         let s = sess("1", "working");
         assert_eq!(col(&run(&i, Some(&s), None, Some(&pr(Overall::CiFailing, PrState::Open)), &r)), (Column::Working, "fixing CI: lint"));
         assert_eq!(col(&run(&i, Some(&sess("1", "idle")), None, Some(&pr(Overall::AwaitingReview, PrState::Open)), &r)).0, Column::Watching);
+    }
+
+    #[test]
+    fn plan_is_approved_by_the_orchestrator_when_sure_enough() {
+        let (i, board) = (issue("1"), HashSet::new());
+        let fp = plan_fp(&fingerprint(&i), "p");
+        let check = |answer: &str, confidence: f32, fp: &str| Record { plan_check: Some(Verdict { confidence, ..verdict(answer, fp) }), ..inv(InvStatus::PlanReady) };
+        let at = |rec: &Record| decide(&IssueView { auto_at: Some(0.75), ..view(&i, &board, None, None, None, rec) });
+        let unchecked = at(&inv(InvStatus::PlanReady));
+        assert_eq!((unchecked.column, unchecked.ask.clone(), unchecked.approve), (Column::NeedsYou, vec![Q::Plan], false));
+        let sure = at(&check("approve", 0.9, &fp));
+        assert_eq!((sure.column, sure.approve, sure.reason.as_str()), (Column::Working, true, "plan approved by the orchestrator (90% sure): r"));
+        assert!(at(&check("approve", 0.75, &fp)).approve); // at the threshold counts
+        let unsure = at(&check("approve", 0.6, &fp));
+        assert_eq!((unsure.column, unsure.approve, unsure.action), (Column::NeedsYou, false, Some(Action::ApprovePlan)));
+        assert!(!at(&check("ask", 0.95, &fp)).approve);
+        assert_eq!(at(&check("approve", 0.9, "edited-plan")).ask, vec![Q::Plan]); // plan changed since: check again
+        // auto-approve off: always the user's
+        assert!(!run(&i, None, None, None, &check("approve", 0.99, &fp)).approve);
     }
 
     #[test]

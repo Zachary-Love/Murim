@@ -1,5 +1,5 @@
 // Pavilion's pure view logic: filters, counts and labels (checked by scripts/pavilionView.check.ts).
-import type { Board, Card, Column, Pick, PvStage, Role } from "./types";
+import type { Board, Card, Column, Pick, PvStage, Role, Verdict } from "./types";
 
 export type Chip = "all" | Exclude<Column, "watching" | "done"> | "failingCi";
 export const CHIPS: [Chip, string][] = [["all", "All"], ["needsYou", "Needs you"], ["working", "Working"], ["blocked", "Blocked"], ["queued", "Queued"], ["failingCi", "Failing CI"]];
@@ -71,9 +71,13 @@ const PICK_TITLE: Partial<Record<Pick, string>> = {
 };
 export const pickTitle = (c: Card) => {
   const v = c.verdict;
-  if (v && c.pick && !["thinking", "pending", "retrying"].includes(c.pick)) return `${v.by === "local" ? "Local model" : "Claude (checking the local model)"} · ${Math.round(v.confidence * 100)}% sure: ${v.reason}`;
+  if (v && c.pick && !["thinking", "pending", "retrying"].includes(c.pick)) return `${v.by === "local" ? "Local model" : "Claude (checking the local model)"} · ${verdictLine(v)}. ${v.reason}`;
   return c.pick === "retrying" ? "The local model and Claude both failed to answer; asked again when the issue changes or in 10 minutes" : (c.pick && PICK_TITLE[c.pick]) || "";
 };
+
+/** What a verdict's answer means, for "92% sure: needs you". Blocker answers are issue identifiers. */
+const ANSWER: Record<string, string> = { ready: "ready to investigate", needsUser: "needs you first", approve: "plan is safe to implement", ask: "plan needs your review", none: "not blocked", act: "agent should change it", skip: "nothing to do" };
+export const verdictLine = (v: Verdict) => `${Math.round(v.confidence * 100)}% sure: ${ANSWER[v.answer] ?? `blocked by ${v.answer}`}`;
 
 /** Header status of the local model: paused / thinking / offline / idle, with the countdown to the next check. */
 export const agentStatus = (b: Board, nowSecs: number): { label: string; tone: Tone } => {

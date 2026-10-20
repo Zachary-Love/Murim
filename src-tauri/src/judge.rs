@@ -15,6 +15,8 @@ pub enum Q {
     Blocker,
     /// PR review feedback: a change for the agent, a call for the user, or nothing to do?
     Feedback,
+    /// an investigation's plan: safe for the agent to implement without the user?
+    Plan,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
@@ -41,6 +43,7 @@ pub fn allowed(q: Q, board: &[String], me: &str) -> Vec<String> {
         Q::Ready => vec!["ready".into(), "needsUser".into()],
         Q::Blocker => board.iter().filter(|b| *b != me).cloned().chain(["none".to_string()]).collect(),
         Q::Feedback => vec!["act".into(), "ask".into(), "skip".into()],
+        Q::Plan => vec!["approve".into(), "ask".into()],
     }
 }
 
@@ -52,6 +55,7 @@ pub fn prompt(q: Q, issue: &str, board: &[(String, String)], me: &str) -> String
             let others: Vec<String> = board.iter().filter(|(id, _)| id != me).map(|(id, t)| format!("{id}: {t}")).collect();
             format!("Does this issue say it must wait until one of the other issues below is finished? Only name an issue if the text says so; otherwise answer \"none\". Allowed answers: the identifier of one issue below, or \"none\".\n{rules}\n\nOther issues:\n{}\n\nIssue:\n{issue}", others.join("\n"))
         }
+        Q::Plan => format!("A coding agent investigated this issue and wrote the implementation plan below. Can the agent implement it without the user reviewing the plan first? \"approve\": the plan is concrete, does what the issue asks, and is low-risk. \"ask\": it makes product or design decisions the issue doesn't settle, is risky (data migrations, deleting data, security, infrastructure, public APIs, billing), is vague, or leaves open questions. Confidence is how sure you are of your answer. Allowed answers: \"approve\", \"ask\".\n{rules}\n\n{issue}"),
         Q::Feedback => format!("You triage code review feedback on a pull request for the coding agent that wrote it. \"act\": it asks for a concrete change the agent can make in the code. \"ask\": it is a question, a product or design decision, or too unclear for the agent, so the person who owns the PR must answer. \"skip\": praise, thanks, a nit explicitly marked optional, or an automated notice with nothing to change. Allowed answers: \"act\", \"ask\", \"skip\".\n{rules}\n\nFeedback:\n{issue}"),
     }
 }
@@ -77,7 +81,7 @@ pub fn needs_check(mode: CheckMode, q: Q, answer: &str, confidence: f32) -> bool
     match mode {
         CheckMode::Off => false,
         CheckMode::LowConfidence => confidence < LOW,
-        CheckMode::Always => !(q == Q::Blocker && answer == "none"), // "none" moves no card
+        CheckMode::Always => !(q == Q::Blocker && answer == "none" || q == Q::Plan && answer == "ask"), // these move nothing: the user decides anyway
     }
 }
 

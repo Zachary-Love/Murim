@@ -3,7 +3,7 @@ import { useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { Card, LogEntry, Session } from "./types";
 import { OVERALL, SEV } from "./types";
-import { PIPELINE, ROLE_LABEL, SOURCE_LABEL, VIEW_LABEL, pill, stepOf } from "./pavilionView";
+import { PIPELINE, ROLE_LABEL, SOURCE_LABEL, VIEW_LABEL, pill, stepOf, verdictLine } from "./pavilionView";
 import { SessionPane } from "./MeditationPane";
 import ReviewView from "./ReviewView";
 import ReviewDraft from "./ReviewDraft";
@@ -50,28 +50,27 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
 
   return (
     <aside className="pvi">
-      <div className="pvi-head">
-        <span className="pvi-cap">INSPECTOR</span>
-        <span className="chip">{SOURCE_LABEL[c.source].replace(/s$/, "")}</span>
-        {onClose && <button className="btn ghost icon pvi-x" title="Close" aria-label="Close inspector" onClick={onClose}>✕</button>}
-      </div>
       <div className="pvi-scroll">
+        {/* compact header: the terminal tab gets the room */}
         <div className="pvi-top">
+          <div className="pvi-titlerow">
+            <h2 className="pvi-title" title={c.title}>{c.title}</h2>
+            <div className="pvi-move">
+              <span className="chip">{SOURCE_LABEL[c.source].replace(/s$/, "")}</span>
+              <span className={`chip ${TONE[st.tone]}`}>{st.label}</span>
+              <select aria-label="Move to" title="Move this card by hand. It stays put until Pavilion sees something new (PR merged, CI failed, agent asks)." disabled={busy} value={c.manual ? c.column : ""}
+                onChange={(e) => exec("pavilion_move", { key: c.key, column: e.target.value || null })}>
+                <option value="">{c.manual ? "Automatic" : "Move to…"}</option>
+                {MOVE.filter(([k]) => k !== "queued" || c.source === "issue").map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+            </div>
+            {onClose && <button className="btn ghost icon pvi-x" title="Close" aria-label="Close inspector" onClick={onClose}>✕</button>}
+          </div>
           <div className="pvi-ident">
             {c.source === "issue" && c.ident && <span>{c.ident}</span>}
             {pr && <span><PrIcon color={SEV[pr.overall] ?? "grey"} title={OVERALL[pr.overall] ?? pr.overall} /> #{pr.number}</span>}
             {c.repo && <span>{c.repo}</span>}
           </div>
-          <h2 className="pvi-title">{c.title}</h2>
-          <div className="pvi-move">
-            <span className={`chip ${TONE[st.tone]}`}>{st.label}</span>
-            <select aria-label="Move to" title="Move this card by hand. It stays put until Pavilion sees something new (PR merged, CI failed, agent asks)." disabled={busy} value={c.manual ? c.column : ""}
-              onChange={(e) => exec("pavilion_move", { key: c.key, column: e.target.value || null })}>
-              <option value="">{c.manual ? "Automatic" : "Move to…"}</option>
-              {MOVE.filter(([k]) => k !== "queued" || c.source === "issue").map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-            </select>
-          </div>
-          {c.summary && <p className="pvi-sum">{c.summary}</p>}
         </div>
         <div className="pvi-tabs" role="tablist">
           {tabs.map(([k, l]) => <button key={k} role="tab" aria-selected={cur === k} className={cur === k ? "on" : ""} onClick={() => setTab(k)}>{l}</button>)}
@@ -119,7 +118,7 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
           )}
           {c.verdict && (
             <section className="pvi-sec">
-              <div className="pvi-row"><span className="pvi-cap">Judgement</span><span className="pvi-dim">{Math.round(c.verdict.confidence * 100)}% confidence</span></div>
+              <div className="pvi-row"><span className="pvi-cap">Judgement</span><span className="pvi-dim">{verdictLine(c.verdict)}</span></div>
               <p className="pvi-text">{c.verdict.reason}</p>
               <div className="pvi-chips"><span className="chip">{c.verdict.by === "claude" ? "Claude-checked" : "Local model"}</span><span className="chip">From local state</span></div>
             </section>
@@ -169,10 +168,12 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
           </ul>
         )}
       </div>
-      <div className="pvi-foot">
-        {elsewhere && <button className="btn" onClick={open}>Open in {view}</button>}
-        {primary && <button className="btn primary" disabled={busy || primary.off} onClick={primary.go}>{primary.label}</button>}
-      </div>
+      {(elsewhere || primary) && (
+        <div className="pvi-foot">
+          {elsewhere && <button className="btn" onClick={open}>Open in {view}</button>}
+          {primary && <button className="btn primary" disabled={busy || primary.off} onClick={primary.go}>{primary.label}</button>}
+        </div>
+      )}
     </aside>
   );
 }

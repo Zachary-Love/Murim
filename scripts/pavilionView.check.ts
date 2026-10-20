@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { filterCards, chipCounts, reposOf, stats, prioLabel, ago, stepOf, pill, NO_FILTERS, agentStatus, PICK, pickTitle } from "../src/pavilionView.ts";
+import { filterCards, chipCounts, reposOf, stats, prioLabel, ago, stepOf, pill, NO_FILTERS, agentStatus, PICK, pickTitle, verdictLine } from "../src/pavilionView.ts";
 
 const card = (o: any) => ({ key: "k", column: "watching", ident: "", title: "t", repo: "", priority: 0, reason: "", by: null, action: null, view: "tasks", target: "k",
   pr: null, session: null, plan: null, updatedAt: "", source: "issue", stage: null, role: null, summary: "", url: "", verdict: null, pick: null, manual: false, ...o }) as any;
@@ -45,6 +45,8 @@ assert.equal(agentStatus(b, 2000).label, "llama3.2 idle · next check 0:00"); //
 assert.equal(agentStatus({ ...b, thinking: "MUR-3", judging: 3, paused: true }, 958).label, "llama3.2 thinking · MUR-3 · 2 waiting"); // thinking wins over paused
 assert.equal(agentStatus({ ...b, paused: true }, 900).tone, "amber");
 assert.equal(PICK.queued.label, "In queue");
-assert.match(pickTitle(card({ pick: "queued", verdict: { by: "local", confidence: 0.82, reason: "clear spec" } })), /Local model · 82% sure: clear spec/);
+assert.equal(pickTitle(card({ pick: "queued", verdict: { by: "local", answer: "ready", confidence: 0.82, reason: "clear spec" } })), "Local model · 82% sure: ready to investigate. clear spec");
+assert.equal(verdictLine({ answer: "needsUser", confidence: 0.9 } as any), "90% sure: needs you first"); // never "90% confidence" on a card that asks you
+assert.equal(verdictLine({ answer: "MUR-2", confidence: 0.7 } as any), "70% sure: blocked by MUR-2");
 assert.equal(pickTitle(card({ pick: "thinking" })), "");
 assert.match(pickTitle(card({ pick: "waitingSlot" })), /agent limit/); // plan pills explain themselves

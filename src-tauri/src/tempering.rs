@@ -137,7 +137,7 @@ pub fn parse_detail(j: &Value, h: &PrHealth) -> Option<PrDetail> {
     let n = j["data"]["repository"]["pullRequests"]["nodes"].get(0).filter(|n| n.is_object())?;
     let nodes = |v: &Value| v["nodes"].as_array().cloned().unwrap_or_default();
     let s = |v: &Value| v.as_str().unwrap_or_default().to_string();
-    let checks = nodes(&n["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["contexts"])
+    let checks = crate::github::latest_checks(&n["commits"]["nodes"][0]["commit"]["statusCheckRollup"])
         .iter()
         .filter_map(|c| {
             let name = s(if c["__typename"] == "CheckRun" { &c["name"] } else { &c["context"] });

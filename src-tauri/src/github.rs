@@ -110,13 +110,28 @@ pub fn parse_pr(json: &Value) -> Option<PrHealth> {
     json["data"]["repository"]["pullRequests"]["nodes"].get(0).filter(|n| n.is_object()).and_then(pr_node)
 }
 
+/// The rollup's checks, newest run per name. GitHub keeps every run on the commit: a check re-run (e.g. when the PR
+/// description is edited) leaves the old failed run in `contexts`, while the PR page shows only the newest.
+pub fn latest_checks(rollup: &Value) -> Vec<Value> {
+    let mut out: Vec<Value> = vec![];
+    for c in rollup["contexts"]["nodes"].as_array().into_iter().flatten() {
+        let name = |c: &Value| if c["__typename"] == "CheckRun" { c["name"].clone() } else { c["context"].clone() };
+        match out.iter_mut().find(|o| name(o) == name(c)) {
+            Some(o) if c["databaseId"].as_u64() > o["databaseId"].as_u64() => *o = c.clone(),
+            Some(_) => {}
+            None => out.push(c.clone()),
+        }
+    }
+    out
+}
+
 /// One PullRequest node (PR_FIELDS selection) -> health.
 pub fn pr_node(n: &Value) -> Option<PrHealth> {
     let nodes = |v: &Value| v["nodes"].as_array().cloned().unwrap_or_default();
     let s = |v: &Value| v.as_str().unwrap_or_default().to_string();
     let rollup = &n["commits"]["nodes"][0]["commit"]["statusCheckRollup"];
     let (mut failing, mut pending) = (vec![], false);
-    for c in nodes(&rollup["contexts"]) {
+    for c in latest_checks(rollup) {
         match c["__typename"].as_str() {
             Some("CheckRun") => match (c["status"].as_str(), c["conclusion"].as_str()) {
                 (Some("COMPLETED"), Some("FAILURE" | "TIMED_OUT" | "CANCELLED" | "ACTION_REQUIRED" | "STARTUP_FAILURE")) => failing.push(s(&c["name"])),
@@ -185,7 +200,7 @@ pub fn token() -> Result<String, String> {
 
 /// Health only (what `pr_node` reads), for searches and review lists. GitHub charges GraphQL by the nodes a query could
 /// return: PR_FIELDS' 10 comments on each of 100 threads cost ~1 point per PR, ~52 for a 50-PR search; this is ~2.
-pub const PR_HEALTH: &str = "number url title state isDraft mergeable reviewDecision headRefOid baseRefName reviewThreads(first:100){nodes{isResolved isOutdated}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name conclusion status} ... on StatusContext{context state}}}}}}}";
+pub const PR_HEALTH: &str = "number url title state isDraft mergeable reviewDecision headRefOid baseRefName reviewThreads(first:100){nodes{isResolved isOutdated}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name conclusion status databaseId} ... on StatusContext{context state}}}}}}}";
 
 /// GraphQL selection for one PR with threads and reviews (Tempering reads them): the per-branch poll only.
 pub const PR_FIELDS: &str = "number url title state isDraft mergeable reviewDecision headRefOid baseRefName reviewThreads(first:100){nodes{id path line isResolved isOutdated comments(last:10){nodes{databaseId author{login} body}}}} latestReviews(first:20){nodes{id state body author{login}}} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name conclusion status databaseId checkSuite{workflowRun{databaseId}}} ... on StatusContext{context state}}}}}}}";
@@ -385,6 +400,16 @@ pub fn refresh_prs(state: State<Github>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rerun_check_counts_only_its_newest_run() {
+        let run = |id: u64, conclusion: &str| json!({"__typename": "CheckRun", "name": "Validate PR Description", "status": "COMPLETED", "conclusion": conclusion, "databaseId": id});
+        let p = |runs: Vec<Value>| pr(json!({"commits": {"nodes": [{"commit": {"statusCheckRollup": {"state": "FAILURE", "contexts": {"nodes": runs}}}}]}}));
+        assert_eq!(p(vec![run(1, "FAILURE"), run(2, "SUCCESS")]).ci, Ci::Passing); // the PR page shows the re-run
+        assert_eq!(p(vec![run(2, "SUCCESS"), run(1, "FAILURE")]).ci, Ci::Passing); // order doesn't matter
+        assert_eq!(p(vec![run(1, "SUCCESS"), run(2, "FAILURE")]).failing_checks, ["Validate PR Description"]);
+        assert!(PR_HEALTH.contains("databaseId"));
+    }
 
     #[test]
     fn backoff_prefers_retry_after_then_reset() {
