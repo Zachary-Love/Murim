@@ -462,3 +462,9 @@ button.chip:hover { background: var(--hover); border-color: var(--line-hi); colo
 .pvi-log time { flex: none; width: 96px; font: 11px var(--mono); color: var(--dim); }
 .pvi-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--line); background: var(--surface); }
 .pvi-foot .btn.primary { flex: 1; justify-content: center; }
+.pv-pills { display: flex; align-items: center; gap: 6px; }
+.pv-pick { gap: 4px; padding-left: 6px; }
+.pv-mini .pv-pick { align-self: flex-start; }
+.pv-pick.thinking svg, .pv-agent.thinking svg { animation: pulse 1.2s ease-in-out infinite; }
+.pv-agent { font-variant-numeric: tabular-nums; }
+.olog { margin: 0; height: calc(100vh - 170px); overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font: 11px/1.55 var(--mono); color: var(--text-2); white-space: pre-wrap; word-break: break-word; }

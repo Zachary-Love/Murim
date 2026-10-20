@@ -43,7 +43,7 @@ export default function App() {
   const [openMed, setOpenMed] = useState<MedSel | null>(null);
   const [autos, setAutos] = useState<Automation[]>([]);
   const [openAuto, setOpenAuto] = useState<AutoSel | null>(null);
-  const [board, setBoard] = useState<Board>({ cards: [], working: 0, max: 10, paused: false, localOffline: false, updated: 0, error: null });
+  const [board, setBoard] = useState<Board>({ cards: [], working: 0, max: 10, paused: false, localOffline: false, updated: 0, error: null, model: "", thinking: null, judging: 0, nextRun: 0 });
   const [reposRoot, setReposRoot] = useState<string | null>(null);
   const med = useArtifacts(view === "meditations", sessions);
   const switchView = (v: View) => { setView(v); setShowSettings(false); try { localStorage.setItem("murim.view", v); } catch {} };

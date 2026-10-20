@@ -35,7 +35,7 @@ const QUERY: &str = r#"query($after: String) { viewer { assignedIssues(first: 10
 
 fn post(api_key: &str, body: Value) -> Result<Value, String> {
     // ureq returns Err on non-2xx; Linear sends GraphQL errors (e.g. RATELIMITED) with 400, so read them.
-    let res = match ureq::post("https://api.linear.app/graphql").set("Authorization", api_key).send_json(body) {
+    let res = match ureq::post("https://api.linear.app/graphql").set("Authorization", api_key).timeout(std::time::Duration::from_secs(30)).send_json(body) {
         Ok(r) => r,
         Err(ureq::Error::Status(_, r)) => r,
         Err(e) => return Err(e.to_string()),

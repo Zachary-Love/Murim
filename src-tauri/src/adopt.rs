@@ -89,7 +89,7 @@ pub fn run(app: &AppHandle) {
     let q = format!("is:pr is:open author:@me archived:false updated:>={} sort:updated-desc", since.format("%Y-%m-%d"));
     let j = match github::gql(&tok, &query(), json!({ "q": q })) {
         Ok(j) => j,
-        Err(e) => return eprintln!("adopt: {e}"),
+        Err(e) => return crate::pavilion::olog(format!("adopt: GitHub search failed: {e}")),
     };
     let sess = sessions::get_sessions(app.state());
     // PRs already owned by a Murim session (task branches) or adopted earlier
@@ -109,15 +109,19 @@ pub fn run(app: &AppHandle) {
         .collect();
     let mut adopted = false;
     for w in new {
-        let Some(clone) = clones.get(&(w.owner.to_lowercase(), w.repo.to_lowercase())) else { continue };
+        let Some(clone) = clones.get(&(w.owner.to_lowercase(), w.repo.to_lowercase())) else {
+            crate::pavilion::olog(format!("adopt: {}/{}#{} needs work but isn't cloned under the repos folder", w.owner, w.repo, w.health.number));
+            continue;
+        };
         let id = session_id(&w.owner, &w.repo, w.health.number);
         match worktree(clone, &w.repo, &w) {
             Ok(wt) => {
                 sessions::adopt(app, &id, &wt.to_string_lossy());
+                crate::pavilion::olog(format!("adopt: picked up {}#{} (Tempering takes it from here)", w.repo, w.health.number));
                 crate::tempering::log(app, &id, format!("Pavilion picked up {}#{}: {}", w.repo, w.health.number, w.health.title));
                 adopted = true;
             }
-            Err(e) => eprintln!("adopt {id}: {e}"),
+            Err(e) => crate::pavilion::olog(format!("adopt {id}: {e}")),
         }
     }
     if adopted {

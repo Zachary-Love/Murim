@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { filterCards, chipCounts, reposOf, stats, prioLabel, ago, stepOf, pill, NO_FILTERS } from "../src/pavilionView.ts";
+import { filterCards, chipCounts, reposOf, stats, prioLabel, ago, stepOf, pill, NO_FILTERS, agentStatus, PICK, pickTitle } from "../src/pavilionView.ts";
 
 const card = (o: any) => ({ key: "k", column: "watching", ident: "", title: "t", repo: "", priority: 0, reason: "", by: null, action: null, view: "tasks", target: "k",
   pr: null, session: null, plan: null, updatedAt: "", source: "issue", stage: null, role: null, summary: "", url: "", verdict: null, ...o }) as any;
@@ -36,3 +36,14 @@ assert.deepEqual(pill(cards[5]), { label: "Agent running", tone: "green" });
 assert.deepEqual(pill(cards[6]), { label: "Merged", tone: "green" });
 assert.deepEqual(pill(cards[3]), { label: "Queued", tone: "grey" });
 console.log("pavilionView ok");
+
+// robot pill + header status
+const b = { cards: [], working: 0, max: 3, paused: false, localOffline: false, updated: 0, error: null, model: "llama3.2", thinking: null, judging: 0, nextRun: 1000 } as any;
+assert.equal(agentStatus(b, 958).label, "llama3.2 idle · next check 0:42");
+assert.equal(agentStatus({ ...b, nextRun: 0 }, 958).label, "llama3.2 idle · ");
+assert.equal(agentStatus(b, 2000).label, "llama3.2 idle · next check 0:00"); // never negative
+assert.equal(agentStatus({ ...b, thinking: "MUR-3", judging: 3, paused: true }, 958).label, "llama3.2 thinking · MUR-3 · 2 waiting"); // thinking wins over paused
+assert.equal(agentStatus({ ...b, paused: true }, 900).tone, "amber");
+assert.equal(PICK.queued.label, "In queue");
+assert.match(pickTitle(card({ pick: "queued", verdict: { by: "local", confidence: 0.82, reason: "clear spec" } })), /Local model · 82% sure: clear spec/);
+assert.equal(pickTitle(card({ pick: "thinking" })), "");

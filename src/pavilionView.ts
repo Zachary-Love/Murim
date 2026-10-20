@@ -1,5 +1,5 @@
 // Pavilion's pure view logic: filters, counts and labels (checked by scripts/pavilionView.check.ts).
-import type { Board, Card, Column, PvStage, Role } from "./types";
+import type { Board, Card, Column, Pick, PvStage, Role } from "./types";
 
 export type Chip = "all" | Exclude<Column, "watching" | "done"> | "failingCi";
 export const CHIPS: [Chip, string][] = [["all", "All"], ["needsYou", "Needs you"], ["working", "Working"], ["blocked", "Blocked"], ["queued", "Queued"], ["failingCi", "Failing CI"]];
@@ -55,5 +55,26 @@ export const pill = (c: Card): { label: string; tone: Tone } =>
   : c.column === "blocked" ? { label: "Blocked", tone: "red" }
   : c.column === "queued" ? { label: "Queued", tone: "grey" }
   : { label: "Watching", tone: "blue" };
+
+/** The robot pill: what the local model (or Claude checking it) picked for a card. */
+export const PICK: Record<Pick, { label: string; tone: Tone }> = {
+  thinking: { label: "Thinking…", tone: "blue" }, pending: { label: "Not judged yet", tone: "grey" }, retrying: { label: "Retry in 10m", tone: "amber" },
+  queued: { label: "In queue", tone: "green" }, needsYou: { label: "Needs you", tone: "amber" }, blocked: { label: "Blocked", tone: "red" },
+};
+export const pickTitle = (c: Card) => {
+  const v = c.verdict;
+  if (v && c.pick && !["thinking", "pending", "retrying"].includes(c.pick)) return `${v.by === "local" ? "Local model" : "Claude (checking the local model)"} · ${Math.round(v.confidence * 100)}% sure: ${v.reason}`;
+  return c.pick === "retrying" ? "The local model and Claude both failed to answer; asked again when the issue changes or in 10 minutes" : "";
+};
+
+/** Header status of the local model: paused / thinking / offline / idle, with the countdown to the next check. */
+export const agentStatus = (b: Board, nowSecs: number): { label: string; tone: Tone } => {
+  const left = Math.max(0, b.nextRun - nowSecs), next = b.nextRun ? `next check ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` : "";
+  const waiting = b.judging > 1 ? ` · ${b.judging - 1} waiting` : "";
+  if (b.thinking) return { label: `${b.model} thinking · ${b.thinking}${waiting}`, tone: "blue" };
+  if (b.paused) return { label: `paused · ${next}`, tone: "amber" };
+  if (b.localOffline) return { label: `${b.model} offline, Claude decides · ${next}`, tone: "amber" };
+  return { label: `${b.model} idle · ${next}`, tone: "grey" };
+};
 
 export const BOARD: [string, Column[]][] = [["Needs you", ["needsYou"]], ["In flight", ["working"]], ["Queued / blocked", ["queued", "blocked"]], ["Watching", ["watching"]], ["Done", ["done"]]];

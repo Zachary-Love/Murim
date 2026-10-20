@@ -101,6 +101,7 @@ export type Card = {
   key: string; column: Column; ident: string; title: string; repo: string; priority: number; reason: string;
   by: "local" | "claude" | null; action: "approvePlan" | "dismissBlocker" | "startNow" | null;
   view: string; target: string; pr: PrHealth | null; session: string | null; plan: string | null; updatedAt: string;
-  source: "issue" | "review" | "agent"; stage: PvStage | null; role: Role | null; summary: string; url: string; verdict: Verdict | null;
+  source: "issue" | "review" | "agent"; stage: PvStage | null; role: Role | null; summary: string; url: string; verdict: Verdict | null; pick: Pick | null;
 };
-export type Board = { cards: Card[]; working: number; max: number; paused: boolean; localOffline: boolean; updated: number; error: string | null };
+export type Pick = "thinking" | "pending" | "retrying" | "queued" | "needsYou" | "blocked";
+export type Board = { cards: Card[]; working: number; max: number; paused: boolean; localOffline: boolean; updated: number; error: string | null; model: string; thinking: string | null; judging: number; nextRun: number };

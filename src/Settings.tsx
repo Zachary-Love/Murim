@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import AppearanceSettings from "./AppearanceSettings";
@@ -6,7 +6,7 @@ import { MODE_LABEL, AgentKind, ReplyMode } from "./types";
 
 type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_temper: boolean; auto_investigate: boolean; claude_check: "always" | "lowConfidence" | "off" } };
 
-export const SECTIONS = ["Appearance", "Prompts", "Folders", "AI", "Pavilion", "Accounts"] as const;
+export const SECTIONS = ["Appearance", "Prompts", "Folders", "AI", "Pavilion", "Orchestrator Log", "Accounts"] as const;
 export type Section = typeof SECTIONS[number];
 
 export function SettingsNav({ tab, onTab }: { tab: Section; onTab: (t: Section) => void }) {
@@ -18,6 +18,26 @@ export function SettingsNav({ tab, onTab }: { tab: Section; onTab: (t: Section) 
       </ul>
     </>
   );
+}
+
+/** ~/.murim/orchestrator.log, polled while open; stays pinned to the bottom unless you scroll up. */
+function OrchestratorLog() {
+  const [text, setText] = useState("");
+  const pre = useRef<HTMLPreElement>(null);
+  useEffect(() => {
+    const load = () => invoke<string>("orchestrator_log").then((t) => {
+      const el = pre.current, pinned = !el || el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+      setText(t);
+      if (pinned) requestAnimationFrame(() => { if (pre.current) pre.current.scrollTop = pre.current.scrollHeight; });
+    }).catch((e) => setText(String(e)));
+    load();
+    const t = setInterval(load, 3000);
+    return () => clearInterval(t);
+  }, []);
+  return <>
+    <p className="muted">What Pavilion's local model and Claude decided, and why Pavilion did or didn't start agents. Also in <code>~/.murim/orchestrator.log</code>.</p>
+    <pre ref={pre} className="olog">{text || "Nothing logged yet. Entries appear on the next board check (every minute) or judgement."}</pre>
+  </>;
 }
 
 // Stays mounted across sections, so unsaved edits survive switching tabs; one Save covers them all.
@@ -58,7 +78,7 @@ export default function Settings({ tab }: { tab: Section }) {
     <form className="pane settings-page" onSubmit={(e) => { e.preventDefault(); save(); }}>
       <header className="topbar" data-tauri-drag-region>
         <h2 data-tauri-drag-region>{tab}</h2>
-        <div className="topbar-right"><span className="muted">{msg}</span>{tab !== "Appearance" && <button className="btn primary" type="submit">Save</button>}</div>
+        <div className="topbar-right"><span className="muted">{msg}</span>{tab !== "Appearance" && tab !== "Orchestrator Log" && <button className="btn primary" type="submit">Save</button>}</div>
       </header>
       <div className="settings">
       {tab === "Folders" && <>
@@ -170,6 +190,7 @@ export default function Settings({ tab }: { tab: Section }) {
         Investigations can't edit files and ask before running commands; coding starts when you approve the plan.</p>
         </>;
       })()}
+      {tab === "Orchestrator Log" && <OrchestratorLog />}
       {tab === "Prompts" && (
       <label>Default prompt
         <textarea value={s.default_prompt} placeholder="Appended to every task prompt, e.g. run the tests before finishing" onChange={(e) => setS({ ...s, default_prompt: e.target.value })} />

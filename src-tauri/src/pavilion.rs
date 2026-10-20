@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 pub const RETRY: Duration = Duration::from_secs(600);
+/// reconcile loop period (a poke runs it sooner)
+pub const TICK: Duration = Duration::from_secs(60);
 
 /// Board column; declaration order = display order and precedence.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
@@ -102,6 +104,21 @@ pub enum Role {
     Meditation,
 }
 
+/// What the local model (or Claude checking it) made of an issue: the card's robot pill.
+#[derive(Serialize, Clone, Copy, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub enum Pick {
+    /// judgement running now or waiting its turn
+    Thinking,
+    /// no verdict yet; asked on the next tick
+    Pending,
+    /// the last judgement failed; asked again when the issue changes or RETRY passes
+    Retrying,
+    Queued,
+    NeedsYou,
+    Blocked,
+}
+
 #[derive(Serialize, Clone, Default, PartialEq, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Card {
@@ -135,6 +152,7 @@ pub struct Card {
     pub url: String,
     /// the judgement behind the column, if any (inspector)
     pub verdict: Option<Verdict>,
+    pub pick: Option<Pick>,
 }
 
 #[derive(PartialEq, Debug)]
@@ -269,6 +287,20 @@ pub fn decide(v: &IssueView) -> Decision {
     Decision { by: ready.map(|r| r.by), action: Some(Action::StartNow), ..d(Column::Queued, "ready to investigate") }
 }
 
+/// The robot pill: only for cards a judgement decided (or is deciding); session, PR and Linear-blocker cards get none.
+pub fn pick_of(dec: &Decision, inflight: bool, retrying: bool) -> Option<Pick> {
+    if !dec.ask.is_empty() {
+        return Some(if inflight { Pick::Thinking } else if retrying { Pick::Retrying } else { Pick::Pending });
+    }
+    dec.by?;
+    match dec.column {
+        Column::Queued => Some(Pick::Queued),
+        Column::NeedsYou => Some(Pick::NeedsYou),
+        Column::Blocked => Some(Pick::Blocked),
+        _ => None,
+    }
+}
+
 /// Someone else's PR. Pavilion never starts review agents; it only shows them.
 pub fn decide_review(s: Option<&SessionInfo>, draft: bool, requested: bool) -> Decision {
     match s {
@@ -341,6 +373,14 @@ pub struct Board {
     /// unix secs of the last change
     pub updated: u64,
     pub error: Option<String>,
+    /// the saved local model (Settings → Pavilion)
+    pub model: String,
+    /// identifier of the issue being judged right now
+    pub thinking: Option<String>,
+    /// judgements running or waiting their turn
+    pub judging: usize,
+    /// unix secs of the next reconcile tick
+    pub next_run: u64,
 }
 
 #[derive(Default)]
@@ -352,6 +392,10 @@ struct Inner {
     /// failed judgements: issue id -> (fingerprint, when)
     retry: HashMap<String, (String, Instant)>,
     offline: bool,
+    /// identifier holding JUDGE_LOCK
+    thinking: Option<String>,
+    /// last board summary logged; logged again only when it changes
+    summary: String,
 }
 
 #[derive(Default)]
@@ -383,6 +427,39 @@ fn save(s: &Store) {
     let tmp = p.with_extension("json.tmp");
     if std::fs::write(&tmp, serde_json::to_string_pretty(s).unwrap_or_default()).is_ok() {
         let _ = std::fs::rename(&tmp, &p);
+    }
+}
+
+/// ~/.murim/orchestrator.log: what Pavilion decided and why (Settings → Orchestrator Log). Rotates to .log.1 past 512 KB.
+pub fn olog(msg: impl AsRef<str>) {
+    use std::io::Write;
+    let Some(p) = store_path().map(|p| p.with_file_name("orchestrator.log")) else { return };
+    if std::fs::metadata(&p).is_ok_and(|m| m.len() > 512 * 1024) {
+        let _ = std::fs::rename(&p, p.with_extension("log.1"));
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+        let _ = writeln!(f, "{} {}", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), msg.as_ref());
+    }
+}
+
+/// The last `n` log lines, newest last.
+pub fn log_tail(text: &str, n: usize) -> String {
+    let l: Vec<&str> = text.lines().collect();
+    l[l.len().saturating_sub(n)..].join("\n")
+}
+
+/// Why Pavilion won't start investigations on its own, if it won't.
+pub fn auto_off(paused: bool, cfg: &settings::Settings) -> Option<&'static str> {
+    if paused {
+        Some("paused (Resume agents on the Pavilion page)")
+    } else if !cfg.pavilion.auto_investigate {
+        Some("auto-investigate is off (Settings → Pavilion)")
+    } else if cfg.repos_root.is_empty() {
+        Some("no repos folder (Settings → Folders)")
+    } else if cfg.agent != AgentKind::Claude {
+        Some("agent isn't Claude Code (Settings → AI)")
+    } else {
+        None
     }
 }
 
@@ -423,7 +500,7 @@ pub fn start(app: AppHandle) {
         heal(&app);
         reconcile(&app);
         let (m, cv) = &app.state::<Pavilion>().wake;
-        drop(cv.wait_timeout_while(m.lock().unwrap(), Duration::from_secs(60), |woken| !*woken).unwrap().0);
+        drop(cv.wait_timeout_while(m.lock().unwrap(), TICK, |woken| !*woken).unwrap().0);
         *m.lock().unwrap() = false;
     });
 }
@@ -439,6 +516,7 @@ fn heal(app: &AppHandle) {
     std::thread::spawn(move || {
         let cfg = settings::dir(&app).map(|d| settings::load(&d).pavilion).unwrap_or_default();
         if judge::test_model(&cfg.ollama_url, &cfg.model).is_ok() {
+            olog(format!("{} answers again", cfg.model));
             pv(&app).data.lock().unwrap().offline = false;
             poke(&app);
         }
@@ -479,6 +557,7 @@ fn reconcile(app: &AppHandle) {
             let inv = map.get(&inv_id(&i.id));
             let v = IssueView { issue: i, session: map.get(&i.id), inv, pr: prs.get(&i.id), rec, board: &board_ids };
             let dec = decide(&v);
+            let pick = pick_of(&dec, g.inflight.contains(&i.id), g.retry.contains_key(&i.id));
             if !dec.ask.is_empty() {
                 asks.push((i.clone(), dec.ask.clone()));
             }
@@ -488,6 +567,7 @@ fn reconcile(app: &AppHandle) {
                 session: if v.session.is_some() { Some(i.id.clone()) } else { inv.map(|_| inv_id(&i.id)) }, plan: rec.investigation.as_ref().filter(|x| x.status == InvStatus::PlanReady).map(|x| x.plan.clone()), updated_at: i.updated_at.clone(),
                 source: Source::Issue, stage: Some(stage_of(&v)), role: role_of(&v), summary: summary_of(&i.description), url: i.url.clone(),
                 verdict: dec.by.and(if dec.action == Some(Action::DismissBlocker) { rec.blocker.clone() } else { rec.ready.clone() }),
+                pick,
             });
         }
         for p in &reviews {
@@ -513,22 +593,40 @@ fn reconcile(app: &AppHandle) {
         }
         cards.sort_by(|a, b| (a.column, a.priority == 0, a.priority, &a.ident).cmp(&(b.column, b.priority == 0, b.priority, &b.ident)));
         let (working, max) = (working(&map), cfg.pavilion.max_agents as usize);
-        let auto = !g.store.paused && cfg.pavilion.auto_investigate && !cfg.repos_root.is_empty() && cfg.agent == AgentKind::Claude;
-        let start: Vec<String> = if auto { to_start(&cards, working, max).iter().map(|c| c.key.clone()).collect() } else { vec![] };
-        let mut board = Board { cards, working, max, paused: g.store.paused, local_offline: g.offline, updated: g.board.updated, error: inbox.error.clone() };
+        let off = auto_off(g.store.paused, &cfg);
+        let start: Vec<String> = if off.is_none() { to_start(&cards, working, max).iter().map(|c| c.key.clone()).collect() } else { vec![] };
+        let n = |c: Column| cards.iter().filter(|x| x.source == Source::Issue && x.column == c).count();
+        let summary = match &inbox.error {
+            Some(e) => format!("Linear error: {e}"),
+            None => format!(
+                "board: {} cycle issues ({} need judging, {} queued, {} blocked, {} need you, {} working); agents {working}/{max}; model {}{}; auto-start {}",
+                inbox.items.len(), asks.len(), n(Column::Queued), n(Column::Blocked), n(Column::NeedsYou), n(Column::Working), cfg.pavilion.model,
+                if g.offline { " (offline)" } else { "" }, off.map_or("on".into(), |o| format!("off: {o}")),
+            ),
+        };
+        if summary != g.summary {
+            olog(&summary);
+            g.summary = summary;
+        }
+        let (thinking, judging) = (g.thinking.clone(), g.inflight.len());
+        let mut board = Board { cards, working, max, paused: g.store.paused, local_offline: g.offline, updated: g.board.updated, error: inbox.error.clone(), model: cfg.pavilion.model.clone(), thinking, judging, next_run: g.board.next_run };
         let changed = board != g.board;
+        // every tick emits so the header countdown restarts; `updated` only moves on a real change
+        board.next_run = now_secs() + TICK.as_secs();
         if changed {
             board.updated = now_secs();
-            let _ = app.emit("pavilion-updated", &board);
-            g.board = board;
         }
+        let _ = app.emit("pavilion-updated", &board);
+        g.board = board;
         (start, changed)
     };
     if changed {
         crate::tray::refresh(app, &map); // plans to approve
     }
     for id in start {
+        olog(format!("starting investigation for {}", crate::inbox::find(app, &id).map(|i| i.issue.identifier).unwrap_or(id.clone())));
         if let Err(e) = start_investigation(app, &id) {
+            olog(format!("could not start investigation: {e}"));
             sessions::notify(app, "Pavilion".into(), format!("Could not start an investigation: {e}"));
         }
     }
@@ -572,16 +670,22 @@ fn spawn_judge(app: &AppHandle, issue: Issue, ask: Vec<Q>, board: Vec<(String, S
     let app = app.clone();
     std::thread::spawn(move || {
         let _one = JUDGE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        pv(&app).data.lock().unwrap().thinking = Some(issue.identifier.clone());
+        poke(&app); // header shows what the model is on
         let cfg = settings::dir(&app).map(|d| settings::load(&d).pavilion).unwrap_or_default();
         let comments = crate::linear::api_key().and_then(|k| crate::linear::recent_comments(&k, &issue.id, 10)).unwrap_or_default();
         let text = issue_text(&issue, &comments);
         let ids: Vec<String> = board.iter().map(|b| b.0.clone()).collect();
+        olog(format!("judging {} ({:?}) with {}", issue.identifier, ask, cfg.model));
         let claude = |p: &str| sessions::claude_print(p, Duration::from_secs(90));
         let (mut out, mut local_ok, mut failed) = (vec![], true, false);
         for q in ask {
             let allowed = judge::allowed(q, &ids, &issue.identifier);
             let o = judge::ask(&cfg, q, &judge::prompt(q, &text, &board, &issue.identifier), &allowed, &fp, claude);
             local_ok &= o.local_ok;
+            for l in &o.log {
+                olog(format!("  {} {q:?}: {l}", issue.identifier));
+            }
             match o.verdict {
                 Some(v) => out.push((q, v)),
                 None => failed = true,
@@ -590,8 +694,10 @@ fn spawn_judge(app: &AppHandle, issue: Issue, ask: Vec<Q>, board: Vec<(String, S
         {
             let mut g = pv(&app).data.lock().unwrap();
             g.inflight.remove(&issue.id);
+            g.thinking = None;
             g.offline = !local_ok;
             if failed {
+                olog(format!("  {} no verdict; retrying when it changes or in 10 min", issue.identifier));
                 g.retry.insert(issue.id.clone(), (fp.clone(), Instant::now()));
             } else {
                 g.retry.remove(&issue.id);
@@ -638,6 +744,11 @@ pub fn plans_ready(app: &AppHandle) -> Vec<(String, String)> {
     let Some(p) = app.try_state::<Pavilion>() else { return vec![] };
     let g = p.data.lock().unwrap();
     g.board.cards.iter().filter(|c| c.action == Some(Action::ApprovePlan)).map(|c| (c.key.clone(), format!("{}  {}", c.ident, c.title))).collect()
+}
+
+#[tauri::command]
+pub fn orchestrator_log() -> String {
+    store_path().and_then(|p| std::fs::read_to_string(p.with_file_name("orchestrator.log")).ok()).map(|t| log_tail(&t, 500)).unwrap_or_default()
 }
 
 #[tauri::command]
@@ -851,6 +962,26 @@ mod tests {
         // only working sessions hold a slot; idle PTYs and questions don't
         let map: HashMap<String, SessionInfo> = [("a", "working"), ("b", "starting"), ("c", "idle"), ("d", "needsInput"), ("e", "ended")].iter().map(|(k, s)| (k.to_string(), sess(k, s))).collect();
         assert_eq!(working(&map), 2);
+    }
+
+    #[test]
+    fn pick_follows_the_judgement() {
+        let ask = Decision { ask: vec![Q::Ready], ..d(Column::Watching, "checking…") };
+        assert_eq!([pick_of(&ask, true, true), pick_of(&ask, false, true), pick_of(&ask, false, false)], [Some(Pick::Thinking), Some(Pick::Retrying), Some(Pick::Pending)]);
+        let by = |c| Decision { by: Some(By::Local), ..d(c, "") };
+        assert_eq!([pick_of(&by(Column::Queued), false, false), pick_of(&by(Column::NeedsYou), false, false), pick_of(&by(Column::Blocked), false, false)], [Some(Pick::Queued), Some(Pick::NeedsYou), Some(Pick::Blocked)]);
+        assert_eq!(pick_of(&d(Column::Blocked, "blocked by MUR-2"), false, false), None); // Linear relation, not the model
+    }
+
+    #[test]
+    fn log_tail_and_auto_off() {
+        assert_eq!(log_tail("a\nb\nc", 2), "b\nc");
+        assert_eq!(log_tail("a", 5), "a");
+        let mut s = settings::Settings { repos_root: "/r".into(), ..Default::default() };
+        assert_eq!(auto_off(false, &s), None);
+        assert!(auto_off(true, &s).unwrap().starts_with("paused"));
+        s.repos_root.clear();
+        assert!(auto_off(false, &s).unwrap().contains("repos folder"));
     }
 
     #[test]

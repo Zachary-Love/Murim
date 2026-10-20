@@ -102,19 +102,32 @@ pub struct Outcome {
     pub verdict: Option<Verdict>,
     /// the local model answered with valid JSON
     pub local_ok: bool,
+    /// what each model said, for the orchestrator log
+    pub log: Vec<String>,
+}
+
+fn said((a, r, c): &(String, String, f32)) -> String {
+    format!("{a} ({:.0}% sure) {r}", c * 100.0)
 }
 
 /// Local answer first; Claude checks when the policy says so, or answers alone when the local model failed.
 pub fn ask(cfg: &PavilionSettings, q: Q, prompt: &str, allowed: &[String], fp: &str, claude: impl Fn(&str) -> Option<String>) -> Outcome {
-    let local = ollama(&cfg.ollama_url, &cfg.model, prompt, allowed).ok().and_then(|r| parse(&r, allowed));
+    let raw = ollama(&cfg.ollama_url, &cfg.model, prompt, allowed);
+    let local = raw.as_ref().ok().and_then(|r| parse(r, allowed));
     let local_ok = local.is_some();
+    let mut log = vec![match (&raw, &local) {
+        (_, Some(l)) => format!("{}: {}", cfg.model, said(l)),
+        (Ok(r), None) => format!("{}: unusable reply: {}", cfg.model, r.chars().take(200).collect::<String>()),
+        (Err(e), _) => format!("{}: failed: {e}", cfg.model),
+    }];
     let v = |(answer, reason, confidence): (String, String, f32), by| Verdict { answer, reason, confidence, by, fingerprint: fp.to_string() };
     match local {
-        Some(l) if !needs_check(cfg.claude_check, q, &l.0, l.2) => Outcome { verdict: Some(v(l, By::Local)), local_ok },
+        Some(l) if !needs_check(cfg.claude_check, q, &l.0, l.2) => Outcome { verdict: Some(v(l, By::Local)), local_ok, log },
         l => {
             let note = l.map(|(a, r, c)| format!("\n\nA small local model answered: {}", json!({"answer": a, "reason": r, "confidence": c}))).unwrap_or_default();
             let checked = claude(&format!("{prompt}{note}\n\nGive your own answer in the same JSON format.")).and_then(|r| parse(&r, allowed));
-            Outcome { verdict: checked.map(|c| v(c, By::Claude)), local_ok }
+            log.push(checked.as_ref().map_or("claude: no usable answer (failed, timed out or bad JSON)".into(), |c| format!("claude: {}", said(c))));
+            Outcome { verdict: checked.map(|c| v(c, By::Claude)), local_ok, log }
         }
     }
 }

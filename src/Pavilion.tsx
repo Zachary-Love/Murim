@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import PavilionInspector from "./PavilionInspector";
-import { PrIcon, RefreshIcon } from "./Icons";
+import { PrIcon, RefreshIcon, RobotIcon } from "./Icons";
 import { SEV, OVERALL, type Board, type Card, type LogEntry, type Session } from "./types";
-import { BOARD, CHIPS, NO_FILTERS, ROLE_LABEL, SOURCE_LABEL, ago, chipCounts, filterCards, pill, prioLabel, reposOf, stats, stepOf, type Chip, type Filters } from "./pavilionView";
+import { BOARD, CHIPS, NO_FILTERS, PICK, ROLE_LABEL, SOURCE_LABEL, agentStatus, ago, chipCounts, filterCards, pickTitle, pill, prioLabel, reposOf, stats, stepOf, type Chip, type Filters } from "./pavilionView";
 
 type Mode = "list" | "board";
 const KEY = "murim.pavilion.view";
@@ -36,6 +36,9 @@ function Meta({ c }: { c: Card }) {
   );
 }
 
+/** What the local model picked for this card, robot on the left. */
+const PickPill = ({ c }: { c: Card }) => c.pick ? <span className={`chip pv-pick ${PICK[c.pick].tone === "grey" ? "" : PICK[c.pick].tone} ${c.pick}`} title={pickTitle(c) || undefined}><RobotIcon />{PICK[c.pick].label}</span> : null;
+
 const Avatar = ({ c }: { c: Card }) => c.role ? <><span className="pv-av">{ROLE_LABEL[c.role][0]}</span><span>{ROLE_LABEL[c.role]}</span></> : null;
 
 export default function Pavilion({ board, sessions, logs, onOpen }: {
@@ -48,6 +51,8 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
   const [drawer, setDrawer] = useState(false);
   const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW).matches);
   const search = useRef<HTMLInputElement>(null);
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => { const t = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000); return () => clearInterval(t); }, []);
   const [dock, setDock] = useState<{ running: number; waiting: number; slots: number } | null>(null);
   useEffect(() => {
     const poll = () => invoke<{ running: number; waiting: number; slots: number }>("docker_queue").then(setDock).catch(() => {});
@@ -121,7 +126,7 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
           {c.reason && <div className={`pv-reason ${p.tone}`}><span className="pv-dot" />{c.reason}</div>}
         </div>
         <div className="pv-rside">
-          <span className={`chip ${p.tone === "grey" ? "" : p.tone}`}>{p.label}</span>
+          <div className="pv-pills"><PickPill c={c} /><span className={`chip ${p.tone === "grey" ? "" : p.tone}`}>{p.label}</span></div>
           <div className="pv-who"><Avatar c={c} />{c.updatedAt && <span className="pv-ago">{ago(c.updatedAt)}</span>}</div>
           {step >= 0 && <div className="pv-bar"><i style={{ width: `${((step + 1) / 6) * 100}%` }} /></div>}
         </div>
@@ -133,6 +138,7 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
       <Meta c={{ ...c, repo: "", priority: 0 }} />
       <div className="pv-title">{c.title}</div>
       {c.reason && <div className="pv-mreason">{c.reason}</div>}
+      <PickPill c={c} />
       <div className="pv-mfoot"><span>{c.repo}</span><span>{c.role ? ROLE_LABEL[c.role] : ""}</span></div>
     </div>
   );
@@ -152,12 +158,12 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
             <p>Every issue, PR and agent in one place.</p>
           </div>
           <div className="pv-actions">
-            {board.localOffline && <span className="chip amber" title="Judgement calls go to Claude until Ollama answers (Settings → Pavilion)">local model offline</span>}
+{(() => { const a = agentStatus(board, now); return <span className={`chip pv-agent ${a.tone === "grey" ? "" : a.tone} ${board.thinking ? "thinking" : ""}`} title={board.localOffline ? "Judgement calls go to Claude until Ollama answers (Settings → Pavilion)" : "Pavilion's local model, from Settings → Pavilion. It re-checks the board every minute and on every change."}><RobotIcon />{a.label}</span>; })()}
             {board.error && <span className="chip red" title={board.error}>Linear error</span>}
             {!!dock?.slots && <span className={`chip ${dock.waiting ? "amber" : ""}`} title="Docker builds and runs started by agents (Settings → AI → Docker jobs at once)">docker {dock.running}/{dock.slots}{dock.waiting ? ` · ${dock.waiting} waiting` : ""}</span>}
             {updated && <span className="chip">updated {updated}</span>}
             <button className="btn" onClick={refresh}><RefreshIcon />Refresh</button>
-            <button className={`btn ${board.paused ? "primary" : ""}`} title="Stop starting new investigations" onClick={() => run("pavilion_set_paused", { paused: !board.paused })}>{board.paused ? "Resume agents" : "Pause agents"}</button>
+            <button className={`btn ${board.paused ? "primary" : ""}`} title="Stop starting investigations and adopting your PRs (judgement calls keep running)" onClick={() => run("pavilion_set_paused", { paused: !board.paused })}>{board.paused ? "Resume agents" : "Pause agents"}</button>
           </div>
         </header>
         {err && <div className="banner">{err}</div>}

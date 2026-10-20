@@ -507,6 +507,9 @@ fn triage(app: &AppHandle, id: &str, d: &PrDetail, mem: &mut Memory) -> bool {
     let mut asked = false;
     for (key, thread_id, at, text) in items {
         let o = judge::ask(&cfg, Q::Feedback, &judge::prompt(Q::Feedback, &format!("{at}\n{text}"), &[], ""), &allowed, &key, |p| sessions::claude_print(p, Duration::from_secs(90)));
+        for l in &o.log {
+            crate::pavilion::olog(format!("  {id} feedback on {at}: {l}"));
+        }
         let Some(v) = o.verdict else { continue };
         match v.answer.as_str() {
             "skip" => {
