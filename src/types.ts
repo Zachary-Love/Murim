@@ -69,7 +69,7 @@ export type Draft = { summary: string; event: "COMMENT" | "APPROVE" | "REQUEST_C
 // Automations: scheduled runs (backend automations.rs). A run is a session keyed "automation:<auto-id>:<run-id>".
 export type Schedule = { kind: "daily" | "weekdays" | "weekly" | "biweekly" | "monthly"; time: string; days: number[]; start: string; dayOfMonth: number };
 export type AutoRun = { id: string; started: number; status: "started" | "failed" | "missed" | "skipped"; error?: string | null; sessionId: string | null };
-export type Automation = { id: string; name: string; prompt: string; folder: string; schedule: Schedule; enabled: boolean; nextDue: number | null; runs: AutoRun[] };
+export type Automation = { id: string; name: string; prompt: string; folder: string; schedule: Schedule; enabled: boolean; nextDue: number | null; model?: string; runs: AutoRun[] };
 export type AutoSel = { kind: "automation" | "run"; id: string }; // run: id = its sessionId
 export const isAuto = (id: string) => id.startsWith("automation:");
 export type RunStatus = "running" | "waiting" | "done" | "failed" | "missed" | "skipped";
@@ -101,7 +101,7 @@ export type Card = {
   key: string; column: Column; ident: string; title: string; repo: string; priority: number; reason: string;
   by: "local" | "claude" | null; action: "approvePlan" | "dismissBlocker" | "startNow" | null;
   view: string; target: string; pr: PrHealth | null; session: string | null; plan: string | null; updatedAt: string;
-  source: "issue" | "review" | "agent"; stage: PvStage | null; role: Role | null; summary: string; url: string; verdict: Verdict | null; pick: Pick | null; manual: boolean;
+  source: "issue" | "review" | "agent"; stage: PvStage | null; role: Role | null; summary: string; url: string; author: string; verdict: Verdict | null; pick: Pick | null; manual: boolean;
 };
 export type Pick = "thinking" | "pending" | "retrying" | "queued" | "needsYou" | "blocked" | "starting" | "waitingSlot" | "autoOff" | "working" | "watching" | "done" | "moved";
 export type Board = { cards: Card[]; working: number; max: number; paused: boolean; localOffline: boolean; updated: number; error: string | null; model: string; thinking: string | null; judging: number; nextRun: number };

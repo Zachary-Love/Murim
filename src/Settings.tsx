@@ -4,7 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import AppearanceSettings from "./AppearanceSettings";
 import { MODE_LABEL, AgentKind, ReplyMode } from "./types";
 
-type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; review_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { local_model: boolean; ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_temper: boolean; auto_investigate: boolean; claude_check: "always" | "lowConfidence" | "off"; auto_approve_at: number } };
+type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; review_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { local_model: boolean; ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_temper: boolean; auto_investigate: boolean; auto_review: boolean; claude_check: "always" | "lowConfidence" | "off"; auto_approve_at: number } };
 
 export const SECTIONS = ["Appearance", "Prompts", "Folders", "AI", "Pavilion", "Orchestrator Log", "Accounts"] as const;
 export type Section = typeof SECTIONS[number];
@@ -207,6 +207,12 @@ export default function Settings({ tab }: { tab: Section }) {
       <label>Investigate ready issues automatically
         <select value={pv.auto_investigate ? "on" : "off"} onChange={(e) => set({ auto_investigate: e.target.value === "on" })}>
           <option value="on">On</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <label>Review teammates' PRs automatically
+        <select value={pv.auto_review ? "on" : "off"} onChange={(e) => set({ auto_review: e.target.value === "on" })}>
+          <option value="on">On, once CI passes and no person has reviewed</option>
           <option value="off">Off</option>
         </select>
       </label>

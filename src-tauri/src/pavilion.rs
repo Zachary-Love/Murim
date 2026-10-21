@@ -79,6 +79,8 @@ pub struct Store {
     /// hand moves of review PR, adopted PR and automation cards (issue cards keep theirs in `items`).
     /// ponytail: entries of cards that left the board linger until their signature goes stale; a few bytes each
     pub moves: HashMap<String, Manual>,
+    /// review PRs Pavilion already started a review agent on, so a dismissed review isn't restarted
+    pub auto_reviewed: HashSet<String>,
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq, Debug)]
@@ -176,6 +178,8 @@ pub struct Card {
     pub summary: String,
     /// Linear issue or PR url
     pub url: String,
+    /// who opened the PR (review cards)
+    pub author: String,
     /// the judgement behind the column, if any (inspector)
     pub verdict: Option<Verdict>,
     pub pick: Option<Pick>,
@@ -404,6 +408,12 @@ pub fn decide_review(s: Option<&SessionInfo>, draft: bool, requested: bool) -> D
         Some(_) if draft => d(Column::NeedsYou, "review draft ready"),
         _ => d(Column::Watching, if requested { "review requested" } else { "team PR" }),
     }
+}
+
+/// Someone else's PR worth an automatic review: open, not a draft, CI passing, no person reviewed it yet
+/// (bot reviews like Bugbot don't count), and no review agent of ours ran on it.
+pub fn wants_review(p: &crate::reviews::ReviewPr, has_session: bool) -> bool {
+    !has_session && !p.reviewed && !p.health.is_draft && p.health.state == PrState::Open && p.health.ci == crate::github::Ci::Passing
 }
 
 /// Automation run or meditation: on the board only while it works or waits on the user.
@@ -687,7 +697,7 @@ fn reconcile(app: &AppHandle) {
     let board_ids: HashSet<String> = inbox.items.iter().map(|it| it.issue.identifier.clone()).collect();
     let titles: Vec<(String, String)> = inbox.items.iter().map(|it| (it.issue.identifier.clone(), it.issue.title.clone())).collect();
     let (mut cards, mut asks, mut approvals) = (vec![], vec![], vec![]);
-    let (start, changed) = {
+    let (start, review, changed) = {
         let mut g = pv(app).data.lock().unwrap();
         if inbox.error.is_none() && !inbox.items.is_empty() {
             let ids: HashSet<&str> = inbox.items.iter().map(|it| it.issue.id.as_str()).collect();
@@ -727,7 +737,7 @@ fn reconcile(app: &AppHandle) {
                 session: if v.session.is_some() { Some(i.id.clone()) } else { inv.map(|_| inv_id(&i.id)) }, plan: rec.investigation.as_ref().filter(|x| x.status == InvStatus::PlanReady).map(|x| x.plan.clone()), updated_at: i.updated_at.clone(),
                 source: Source::Issue, stage: Some(stage_of(&v)), role: role_of(&v), summary: summary_of(&i.description), url: i.url.clone(),
                 verdict: dec.by.and(if dec.action == Some(Action::DismissBlocker) { rec.blocker.clone() } else if plan_stage { rec.plan_check.clone() } else { rec.ready.clone() }),
-                pick, manual, auto: sig,
+                pick, manual, auto: sig, author: String::new(),
             });
         }
         // one log line per issue whenever its column or reason changes: why nothing starts is in the log
@@ -747,7 +757,7 @@ fn reconcile(app: &AppHandle) {
         }
         for p in &reviews {
             let dec = decide_review(map.get(&p.session_id), crate::reviews::has_draft(p), p.requested);
-            cards.push(Card { key: p.key.clone(), column: dec.column, ident: format!("{}#{}", p.repo, p.number), title: p.health.title.clone(), repo: p.repo.clone(), reason: dec.reason, view: "reviews".into(), target: p.key.clone(), pr: Some(p.health.clone()), source: Source::Review, stage: Some(Stage::Review), role: map.get(&p.session_id).map(|_| Role::Reviewer), session: map.contains_key(&p.session_id).then(|| p.session_id.clone()), url: p.health.url.clone(), ..Default::default() });
+            cards.push(Card { key: p.key.clone(), column: dec.column, ident: format!("{}#{}", p.repo, p.number), title: p.health.title.clone(), repo: p.repo.clone(), reason: dec.reason, view: "reviews".into(), target: p.key.clone(), pr: Some(p.health.clone()), source: Source::Review, stage: Some(Stage::Review), role: map.get(&p.session_id).map(|_| Role::Reviewer), session: map.contains_key(&p.session_id).then(|| p.session_id.clone()), url: p.health.url.clone(), author: match &p.author { crate::reviews::Author::Linear { name, .. } => name.clone(), crate::reviews::Author::Unlinked { login } => format!("@{login}") }, ..Default::default() });
         }
         for (id, s) in &map {
             if sessions::is_adopted(id) {
@@ -783,6 +793,17 @@ fn reconcile(app: &AppHandle) {
         let (working, max) = (working(&map), cfg.pavilion.max_agents as usize);
         let off = auto_off(g.store.paused, &cfg);
         let start: Vec<String> = if off.is_none() { to_start(&cards, working, max).iter().map(|c| c.key.clone()).collect() } else { vec![] };
+        let review: Vec<String> = if off.is_none() && cfg.pavilion.auto_review {
+            let mut r: Vec<String> = reviews.iter().filter(|p| !g.store.auto_reviewed.contains(&p.key) && wants_review(p, map.contains_key(&p.session_id))).map(|p| p.key.clone()).collect();
+            r.truncate(max.saturating_sub(working + start.len()));
+            r
+        } else {
+            vec![]
+        };
+        if !review.is_empty() {
+            g.store.auto_reviewed.extend(review.iter().cloned());
+            save(&g.store);
+        }
         for c in cards.iter_mut() {
             c.pick = plan_of(c, c.pick, off.is_some(), start.contains(&c.key));
         }
@@ -811,7 +832,7 @@ fn reconcile(app: &AppHandle) {
             let _ = app.emit("pavilion-updated", &board);
         }
         g.board = board;
-        (start, changed)
+        (start, review, changed)
     };
     if changed {
         crate::tray::refresh(app, &map); // plans to approve
@@ -821,6 +842,12 @@ fn reconcile(app: &AppHandle) {
         if let Err(e) = start_investigation(app, &id) {
             olog(format!("could not start investigation: {e}"));
             sessions::notify(app, "Pavilion".into(), format!("Could not start an investigation: {e}"));
+        }
+    }
+    for key in review {
+        olog(format!("{key}: CI passes and nobody has reviewed it; starting a review agent"));
+        if let Err(e) = crate::reviews::start_review_agent(app.clone(), key.clone()) {
+            olog(format!("could not start a review of {key}: {e}"));
         }
     }
     // ponytail: approvals don't wait for a slot: the investigation that wrote the plan just gave its slot back

@@ -64,6 +64,8 @@ pub struct ReviewPr {
     pub issue: Option<LinkedIssue>,
     pub bucket: Bucket,
     pub health: PrHealth,
+    /// a person (not a bot like Bugbot) already reviewed it
+    pub reviewed: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -134,6 +136,7 @@ pub fn to_review(n: &Value, requested: bool) -> Option<ReviewPr> {
         requested,
         issue: None,
         bucket: bucket(health.overall),
+        reviewed: n["latestReviews"]["nodes"].as_array().is_some_and(|a| a.iter().any(|r| r["author"]["__typename"] != "Bot")),
         owner,
         repo,
         health,
@@ -193,13 +196,13 @@ pub struct Reviews {
 }
 
 fn search_query() -> String {
-    format!("query($q:String!){{viewer{{login}} search(query:$q,type:ISSUE,first:50){{nodes{{... on PullRequest{{{} body headRefName author{{login}} repository{{name owner{{login}}}}}}}}}}}}", github::PR_HEALTH)
+    format!("query($q:String!){{viewer{{login}} search(query:$q,type:ISSUE,first:50){{nodes{{... on PullRequest{{{} body headRefName author{{login}} latestReviews(first:10){{nodes{{author{{__typename}}}}}} repository{{name owner{{login}}}}}}}}}}}}", github::PR_HEALTH)
 }
 
 /// Many PR URLs in one query (aliases p0, p1, …): one point for the batch instead of one per PR.
 pub fn urls_query(n: usize) -> String {
     let vars: Vec<String> = (0..n).map(|i| format!("$u{i}:URI!")).collect();
-    let body: String = (0..n).map(|i| format!("p{i}:resource(url:$u{i}){{... on PullRequest{{{} body headRefName author{{login}} repository{{name owner{{login}}}}}}}} ", github::PR_HEALTH)).collect();
+    let body: String = (0..n).map(|i| format!("p{i}:resource(url:$u{i}){{... on PullRequest{{{} body headRefName author{{login}} latestReviews(first:10){{nodes{{author{{__typename}}}}}} repository{{name owner{{login}}}}}}}} ", github::PR_HEALTH)).collect();
     format!("query({}){{{body}}}", vars.join(","))
 }
 
@@ -501,6 +504,20 @@ mod tests {
                "repository": {"name": "r", "owner": {"login": "o"}}})
     }
     fn amy() -> Assignee { Assignee { id: "u1".into(), name: "Amy".into(), avatar_url: None } }
+
+    #[test]
+    fn auto_review_only_when_ci_passes_and_no_person_reviewed() {
+        let mut n = node(1, "bob", "x");
+        n["commits"] = json!({"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS", "contexts": {"nodes": []}}}}]});
+        let p = to_review(&n, true).unwrap();
+        assert!(crate::pavilion::wants_review(&p, false));
+        assert!(!crate::pavilion::wants_review(&p, true)); // our agent already has a session
+        n["latestReviews"] = json!({"nodes": [{"author": {"__typename": "Bot"}}]});
+        assert!(crate::pavilion::wants_review(&to_review(&n, true).unwrap(), false)); // Bugbot doesn't count
+        n["latestReviews"] = json!({"nodes": [{"author": {"__typename": "Bot"}}, {"author": {"__typename": "User"}}]});
+        assert!(!crate::pavilion::wants_review(&to_review(&n, true).unwrap(), false));
+        assert!(!crate::pavilion::wants_review(&to_review(&node(2, "bob", "x"), true).unwrap(), false)); // no checks
+    }
 
     #[test]
     fn idents_and_urls() {

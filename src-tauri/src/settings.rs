@@ -104,6 +104,8 @@ pub struct PavilionSettings {
     /// Tempering on for every Claude session with an open PR (the local model triages the feedback first).
     pub auto_temper: bool,
     pub auto_investigate: bool,
+    /// start a review agent on others' PRs once CI passes and no person has reviewed
+    pub auto_review: bool,
     pub claude_check: CheckMode,
     /// the orchestrator approves an investigation's plan itself (and coding starts) when it's at least this sure; 0 = always ask
     pub auto_approve_at: f32,
@@ -111,7 +113,7 @@ pub struct PavilionSettings {
 
 impl Default for PavilionSettings {
     fn default() -> Self {
-        Self { local_model: true, ollama_url: "http://localhost:11434".into(), model: "qwen3:4b".into(), max_agents: 10, docker_slots: 2, auto_temper: true, auto_investigate: true, claude_check: CheckMode::Always, auto_approve_at: 0.75 }
+        Self { local_model: true, ollama_url: "http://localhost:11434".into(), model: "qwen3:4b".into(), max_agents: 10, docker_slots: 2, auto_temper: true, auto_investigate: true, auto_review: true, claude_check: CheckMode::Always, auto_approve_at: 0.75 }
     }
 }
 

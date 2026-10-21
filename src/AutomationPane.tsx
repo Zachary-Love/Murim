@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Automation, AutoSel, Schedule, Session, DAYS, runStatus } from "./types";
@@ -17,6 +17,10 @@ export default function AutomationPane({ auto, sessions, onOpen, onSaved }: Prop
   const [f, setF] = useState(auto); // runs etc. come from `auto`; only the form fields are local
   const [msg, setMsg] = useState("");
   const [confirm, setConfirm] = useState(false);
+  const [local, setLocal] = useState<string[]>([]);
+  useEffect(() => {
+    invoke<{ pavilion: { ollama_url: string } }>("get_settings").then((c) => invoke<string[]>("ollama_models", { url: c.pavilion.ollama_url })).then(setLocal).catch(() => {});
+  }, []);
   const sch = (s: Partial<Schedule>) => setF({ ...f, schedule: { ...f.schedule, ...s } });
   const fail = (e: unknown) => setMsg(String(e));
   const save = () => invoke<Automation>("save_automation", { automation: { ...auto, ...f, runs: auto.runs } })
@@ -49,6 +53,15 @@ export default function AutomationPane({ auto, sessions, onOpen, onSaved }: Prop
               }}>Choose…</button>
             </div>
           </label>
+          <label>Model
+            <select value={f.model ?? ""} onChange={(e) => setF({ ...f, model: e.target.value })}>
+              <option value="">Claude default</option>
+              <optgroup label="Claude"><option value="opus">Opus</option><option value="sonnet">Sonnet</option><option value="haiku">Haiku</option></optgroup>
+              {(local.length > 0 || f.model?.startsWith("ollama:")) && <optgroup label="Local (Ollama)">
+                {[...new Set([...local, ...(f.model?.startsWith("ollama:") ? [f.model.slice(7)] : [])])].map((m) => <option key={m} value={`ollama:${m}`}>{m}</option>)}
+              </optgroup>}
+            </select>
+          </label>
           <label>Schedule
             <div className="group">
               <select value={s.kind} onChange={(e) => sch({ kind: e.target.value as Schedule["kind"] })}>
@@ -59,7 +72,7 @@ export default function AutomationPane({ auto, sessions, onOpen, onSaved }: Prop
                 <option value="monthly">Monthly</option>
               </select>
               <span className="muted">at</span>
-              <input type="time" value={s.time} onChange={(e) => sch({ time: e.target.value })} />
+              <TimePick value={s.time} onChange={(time) => sch({ time })} />
             </div>
           </label>
           {weekly && <div className="group days">
@@ -97,6 +110,19 @@ export default function AutomationPane({ auto, sessions, onOpen, onSaved }: Prop
       </div>
     </div>
   );
+}
+
+/** 12-hour hour / minute / AM-PM selects over a 24h "HH:MM" value. */
+function TimePick({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [h24, m] = value.split(":").map(Number);
+  const pm = h24 >= 12, h12 = h24 % 12 || 12;
+  const set = (h: number, min: number, p: boolean) => onChange(`${String((h % 12) + (p ? 12 : 0)).padStart(2, "0")}:${String(min).padStart(2, "0")}`);
+  const mins = [...new Set([...Array.from({ length: 12 }, (_, i) => i * 5), m])].sort((a, b) => a - b);
+  return <>
+    <select aria-label="Hour" value={h12} onChange={(e) => set(+e.target.value, m, pm)}>{Array.from({ length: 12 }, (_, i) => i + 1).map((h) => <option key={h} value={h}>{h}</option>)}</select>
+    <select aria-label="Minute" value={m} onChange={(e) => set(h12, +e.target.value, pm)}>{mins.map((x) => <option key={x} value={x}>{String(x).padStart(2, "0")}</option>)}</select>
+    <select aria-label="AM or PM" value={pm ? "pm" : "am"} onChange={(e) => set(h12, m, e.target.value === "pm")}><option value="am">AM</option><option value="pm">PM</option></select>
+  </>;
 }
 
 export function RunPane({ auto, id, session }: { auto?: Automation; id: string; session?: Session }) {

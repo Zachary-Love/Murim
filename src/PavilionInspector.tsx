@@ -67,9 +67,10 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
             {onClose && <button className="btn ghost icon pvi-x" title="Close" aria-label="Close inspector" onClick={onClose}>✕</button>}
           </div>
           <div className="pvi-ident">
-            {c.source === "issue" && c.ident && <span>{c.ident}</span>}
-            {pr && <span><PrIcon color={SEV[pr.overall] ?? "grey"} title={OVERALL[pr.overall] ?? pr.overall} /> #{pr.number}</span>}
+            {c.source === "issue" && c.ident && <button className="link-btn" title="Open in Linear" onClick={() => openUrl(c.url)}>{c.ident}</button>}
+            {pr && <button className="link-btn" title="Open on GitHub" onClick={() => openUrl(pr.url)}><PrIcon color={SEV[pr.overall] ?? "grey"} title={OVERALL[pr.overall] ?? pr.overall} /> #{pr.number}</button>}
             {c.repo && <span>{c.repo}</span>}
+            {c.author && <span title="Opened by">by {c.author}</span>}
           </div>
         </div>
         <div className="pvi-tabs" role="tablist">

@@ -31,6 +31,7 @@ function Meta({ c }: { c: Card }) {
       {c.pr && <span className="pv-prn"><PrIcon color={SEV[c.pr.overall] ?? "grey"} title={`${OVERALL[c.pr.overall] ?? c.pr.overall} #${c.pr.number}`} />#{c.pr.number}</span>}
       {c.repo && ((c.ident && c.source !== "review") || c.pr) && <span className="pv-sep">·</span>}
       {c.repo && <span className="pv-repo">{c.repo}</span>}
+      {c.author && <span className="pv-repo" title="Opened by">by {c.author}</span>}
       {prio && <span className="pv-prio">{prio}</span>}
     </div>
   );

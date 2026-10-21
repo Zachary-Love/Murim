@@ -68,9 +68,18 @@ pub struct Automation {
     pub enabled: bool,
     #[serde(default)]
     pub next_due: Option<i64>,
+    /// "" = Claude's default, a Claude alias (opus, sonnet, haiku) or "ollama:<model>"
+    #[serde(default)]
+    pub model: String,
     /// newest first, ≤ KEEP
     #[serde(default)]
     pub runs: Vec<AutoRun>,
+}
+
+/// The model an automation run (`automation:<auto-id>:<run-id>`) uses; looked up at spawn so resumes keep it.
+pub fn model_of(app: &AppHandle, session_id: &str) -> String {
+    let id = session_id.split(':').nth(1).unwrap_or_default();
+    app.state::<Automations>().0.lock().unwrap().iter().find(|a| a.id == id).map(|a| a.model.clone()).unwrap_or_default()
 }
 
 #[derive(Default)]
@@ -411,7 +420,7 @@ mod tests {
 
     #[test]
     fn validation() {
-        let ok = Automation { id: String::new(), name: "Inbox zero".into(), prompt: "p".into(), folder: String::new(), schedule: sch(Kind::Weekly, "09:00", &[1], "", 0), enabled: true, next_due: None, runs: vec![] };
+        let ok = Automation { id: String::new(), name: "Inbox zero".into(), prompt: "p".into(), folder: String::new(), schedule: sch(Kind::Weekly, "09:00", &[1], "", 0), enabled: true, next_due: None, model: String::new(), runs: vec![] };
         assert!(validate(&ok).is_ok());
         let bad = |f: fn(&mut Automation)| {
             let mut a = ok.clone();

@@ -528,7 +528,8 @@ pub fn exclude_settings(repo: &Path) -> Result<(), String> {
 /// Prompt goes before the flags: --allowedTools is variadic and would swallow a trailing positional.
 fn flags(m: PermissionMode) -> Vec<&'static str> {
     match m {
-        PermissionMode::Normal => vec![],
+        // explicit: otherwise Claude Code falls back to the user's own defaultMode (e.g. auto)
+        PermissionMode::Normal => vec!["--permission-mode", "default"],
         PermissionMode::Skip => vec!["--dangerously-skip-permissions"],
         PermissionMode::Allowlist => vec![
             "--permission-mode",
@@ -557,6 +558,7 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
     } else {
         None
     };
+    let mut local_model: Option<String> = None;
     let (vars, claude) = shell_env();
     let hk = app.state::<Hooks>();
     let pair = native_pty_system().openpty(PtySize { rows: 40, cols: 120, pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string())?;
@@ -579,6 +581,14 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
             c.args(["--settings", &merge_hooks(json!({})).to_string(), "--disallowedTools", "Edit,Write,NotebookEdit"]);
         } else if is_automation(issue_id) {
             c.args(["--settings", &merge_hooks(json!({})).to_string()]); // also on resume
+            let m = crate::automations::model_of(app, issue_id);
+            if let Some(local) = m.strip_prefix("ollama:") {
+                // Ollama speaks the Anthropic Messages API; set after the login-shell env below so it wins
+                local_model = Some(settings::load(&settings::dir(app)?).pavilion.ollama_url);
+                c.args(["--model", local]);
+            } else if !m.is_empty() {
+                c.args(["--model", &m]);
+            }
         } else if wt.is_empty() {
             // repo-pick session: hooks via --settings (nothing written into repos_root), no file edits
             c.args(["--settings", &merge_hooks(json!({})).to_string(), "--disallowedTools", "Edit,Write,NotebookEdit"]);
@@ -603,6 +613,11 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
     c.env("MURIM_PORT", hk.port.to_string());
     c.env("MURIM_TOKEN", &hk.token);
     c.env("MURIM_TASK", issue_id);
+    if let Some(url) = &local_model {
+        c.env("ANTHROPIC_BASE_URL", url.trim_end_matches('/'));
+        c.env("ANTHROPIC_AUTH_TOKEN", "ollama");
+        c.env("ANTHROPIC_API_KEY", "");
+    }
     if let (true, Some(d)) = (custom, &arts) {
         c.env("MURIM_ARTIFACTS", d);
     }
@@ -864,7 +879,7 @@ fn start_agent(app: &AppHandle, id: &str, wt: &str, name: String, head: Vec<Stri
         if g.ptys.contains_key(id) {
             return Err("already running".to_string());
         }
-        g.map.insert(id.into(), SessionInfo { issue_id: id.into(), worktree: wt.into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode: if is_investigation(id) { PermissionMode::Normal } else { cfg.default_permission_mode }, tempering: false, tempering_off: false, tempering_note: String::new(), escalations: vec![], memory: Default::default(), pr_flow: PrFlow::None, agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), name, tempering_turn: false });
+        g.map.insert(id.into(), SessionInfo { issue_id: id.into(), worktree: wt.into(), session_id: None, status: Status::Starting, questions: None, pty_alive: false, permission_mode: cfg.default_permission_mode, tempering: false, tempering_off: false, tempering_note: String::new(), escalations: vec![], memory: Default::default(), pr_flow: PrFlow::None, agent: cfg.agent, agent_command: cfg.agent_command.trim().to_string(), name, tempering_turn: false });
         Ok(())
     })?;
     spawn(app, id, head)
