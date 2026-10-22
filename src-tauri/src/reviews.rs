@@ -279,11 +279,17 @@ pub fn combine(gh: Result<(String, Vec<ReviewPr>), String>, team: Result<Vec<Rev
     Payload { prs, error: (!errs.is_empty()).then(|| errs.join("; ")), loaded: true }
 }
 
+/// `list`: GitHub logins separated by commas or whitespace, an optional leading @, any case.
+fn blocked(login: &str, list: &str) -> bool {
+    list.split(|c: char| c == ',' || c.is_whitespace()).any(|b| !b.is_empty() && b.trim_start_matches('@').eq_ignore_ascii_case(login))
+}
+
 fn poll(app: &AppHandle) {
     let p = match github::token() {
         Err(e) => Payload { prs: vec![], error: Some(e), loaded: true },
         Ok(tok) => {
             let gh = requested(&tok);
+            let me = gh.as_ref().map(|(m, _)| m.clone()).unwrap_or_default();
             let skip: Vec<String> = gh.as_ref().map(|(_, v)| v.iter().map(|p| p.health.url.clone()).collect()).unwrap_or_default();
             let t = team(&tok, &skip);
             let mut p = combine(gh, t);
@@ -293,6 +299,9 @@ fn poll(app: &AppHandle) {
                 Ok(more) => p.prs.extend(more.into_iter().filter(|x| x.health.state == github::PrState::Open && (has_draft(x) || sessions::pty_alive(app, &x.session_id)))),
                 Err(e) => p.error = Some(p.error.map_or(e.clone(), |o| format!("{o}; {e}"))),
             }
+            // reviewed_elsewhere bypasses combine's own-PR filter, so filter again with the user's blocklist
+            let block = crate::settings::dir(app).map(|d| crate::settings::load(&d).review_blocklist).unwrap_or_default();
+            p.prs.retain(|x| x.author_login != me && !blocked(&x.author_login, &block));
             link_by_branch(app, &mut p.prs);
             p
         }
@@ -562,6 +571,14 @@ mod tests {
         assert_eq!(session_id("o", "r", 5), "review:o/r/5");
         assert_eq!(parse_session("review:o/r/5"), Some(("o".into(), "r".into(), 5)));
         assert_eq!(parse_session("issue-1"), None);
+    }
+
+    #[test]
+    fn blocklist_matches_logins() {
+        assert!(blocked("Zachary-Love", "bob, @zachary-love"));
+        assert!(blocked("bob", "amy\nbob"));
+        assert!(!blocked("bobby", "bob"));
+        assert!(!blocked("", ""));
     }
 
     #[test]
