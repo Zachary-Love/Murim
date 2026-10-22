@@ -4,7 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import AppearanceSettings from "./AppearanceSettings";
 import { MODE_LABEL, AgentKind, ReplyMode } from "./types";
 
-type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; pr_prompt: string; review_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { local_model: boolean; ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_temper: boolean; auto_investigate: boolean; auto_review: boolean; claude_check: "always" | "lowConfidence" | "off"; auto_approve_at: number } };
+type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; pr_prompt: string; bedrock: boolean; aws_region: string; aws_profile: string; review_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { local_model: boolean; ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_temper: boolean; auto_investigate: boolean; auto_review: boolean; plan_first: boolean; claude_check: "always" | "lowConfidence" | "off"; auto_approve_at: number } };
 
 export const SECTIONS = ["Appearance", "Prompts", "Folders", "AI", "Pavilion", "Orchestrator Log", "Accounts"] as const;
 export type Section = typeof SECTIONS[number];
@@ -157,6 +157,22 @@ export default function Settings({ tab }: { tab: Section }) {
       {s.default_permission_mode === "skip" && (
         <p className="warn">Bypass permissions runs Claude Code with --dangerously-skip-permissions: no prompts for any tool.</p>
       )}
+      <label>Claude provider
+        <select value={s.bedrock ? "bedrock" : "anthropic"} onChange={(e) => setS({ ...s, bedrock: e.target.value === "bedrock" })}>
+          <option value="anthropic">Anthropic (your Claude login)</option>
+          <option value="bedrock">Amazon Bedrock</option>
+        </select>
+      </label>
+      {s.bedrock && <>
+        <label>AWS region
+          <input className="mono" value={s.aws_region} placeholder="us-east-1 (blank: your AWS config)" onChange={(e) => setS({ ...s, aws_region: e.target.value })} />
+        </label>
+        <label>AWS profile
+          <input className="mono" value={s.aws_profile} placeholder="blank: default credentials" onChange={(e) => setS({ ...s, aws_profile: e.target.value })} />
+        </label>
+        <p className="muted">Every Claude Code agent and judgement call runs with CLAUDE_CODE_USE_BEDROCK=1 and these AWS settings.
+          Claude.ai connectors don't load on Bedrock, so agents get Linear's MCP server with your Linear API key instead.</p>
+      </>}
       <label>Review replies (Tempering)
         <select value={s.reply_mode} onChange={(e) => setS({ ...s, reply_mode: e.target.value as ReplyMode })}>
           <option value="off">Off</option>
@@ -204,7 +220,7 @@ export default function Settings({ tab }: { tab: Section }) {
       {mErr ? <p className="muted">{mErr}</p> : models && !models.length && <p className="muted">Ollama is running but has no models yet.</p>}
       <p className="muted">Install Ollama and run <code>ollama pull {pv.model || "qwen3:4b"}</code>. Without it, Pavilion's judgement calls go to Claude.</p>
       </>}
-      <label>Investigate ready issues automatically
+      <label>Start ready issues automatically
         <select value={pv.auto_investigate ? "on" : "off"} onChange={(e) => set({ auto_investigate: e.target.value === "on" })}>
           <option value="on">On</option>
           <option value="off">Off</option>
@@ -213,17 +229,23 @@ export default function Settings({ tab }: { tab: Section }) {
       <label>Review teammates' PRs automatically
         <select value={pv.auto_review ? "on" : "off"} onChange={(e) => set({ auto_review: e.target.value === "on" })}>
           <option value="on">On, once CI passes and no person has reviewed</option>
-          <option value="off">Off</option>
+          <option value="off">Off, they show up in Needs you for you to review</option>
         </select>
       </label>
-      <label>Approve plans automatically
+      <label>Plan before coding
+        <select value={pv.plan_first ? "on" : "off"} onChange={(e) => set({ plan_first: e.target.value === "on" })}>
+          <option value="off">Off, ready issues go straight to the coding agent</option>
+          <option value="on">On, investigate and write a plan first</option>
+        </select>
+      </label>
+      {pv.plan_first && <label>Approve plans automatically
         <select value={String(pv.auto_approve_at)} onChange={(e) => set({ auto_approve_at: Number(e.target.value) })}>
           <option value="0">Never, always ask me</option>
           <option value="0.6">When 60% sure</option>
           <option value="0.75">When 75% sure</option>
           <option value="0.9">When 90% sure</option>
         </select>
-      </label>
+      </label>}
       <p className="muted">When an investigation finishes, the orchestrator reviews the plan. If it's sure enough the plan is concrete and low-risk, coding starts without you; risky plans (migrations, deletions, security, infrastructure, public APIs) and open questions come to you.</p>
       <label>Handle PR feedback automatically
         <select value={pv.auto_temper ? "on" : "off"} onChange={(e) => set({ auto_temper: e.target.value === "on" })}>
@@ -242,7 +264,7 @@ export default function Settings({ tab }: { tab: Section }) {
       </label>
       <p className="muted">Claude (Haiku) checks the local model before Pavilion starts an investigation or marks an issue blocked.</p>
       </>}
-      <p className="muted">Investigations can't edit files and run in your default permission mode; coding starts when you approve the plan.</p>
+      {pv.plan_first && <p className="muted">Investigations can't edit files and run in your default permission mode; coding starts when the plan is approved.</p>}
         </>;
       })()}
       {tab === "Orchestrator Log" && <OrchestratorLog />}

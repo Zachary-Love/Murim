@@ -45,6 +45,7 @@ pub fn run() {
             if settings::load(&settings::dir(app.handle())?).caffeine {
                 caffeine::set(&app.state::<caffeine::Caffeine>(), true)?;
             }
+            *settings::CLAUDE_ENV.lock().unwrap() = settings::claude_env(&settings::load(&settings::dir(app.handle())?));
             sessions::load(app.handle());
             pavilion::load(app.handle());
             docker::install(settings::load(&settings::dir(app.handle())?).pavilion.docker_slots);

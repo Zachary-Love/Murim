@@ -387,6 +387,18 @@ pub fn shell_env() -> &'static (Vec<(String, String)>, Option<String>) {
     })
 }
 
+/// ~/.murim/linear-mcp.json (0600: it holds the API key, kept off the command line): Linear's hosted MCP server.
+fn linear_mcp_config() -> Result<String, String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let key = crate::linear::api_key()?;
+    let f = PathBuf::from(std::env::var("HOME").map_err(|e| e.to_string())?).join(".murim/linear-mcp.json");
+    let body = json!({"mcpServers": {"linear": {"type": "http", "url": "https://mcp.linear.app/mcp", "headers": {"Authorization": format!("Bearer {key}")}}}}).to_string();
+    let mut w = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&f).map_err(|e| e.to_string())?;
+    w.write_all(body.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(f.to_string_lossy().into_owned())
+}
+
 /// One-shot `claude -p --model haiku <prompt>` with the login-shell env. None on spawn failure, error exit or timeout.
 pub fn claude_print(prompt: &str, timeout: Duration) -> Option<String> {
     use std::process::Stdio;
@@ -399,6 +411,7 @@ pub fn claude_print(prompt: &str, timeout: Duration) -> Option<String> {
         }
     }
     cmd.envs(vars.iter().filter(|(k, _)| !(k.starts_with("CLAUDE") || k.starts_with("AI_AGENT"))).map(|(k, v)| (k, v)));
+    cmd.envs(settings::CLAUDE_ENV.lock().unwrap().clone());
     let mut child = cmd.spawn().map_err(|e| eprintln!("claude spawn failed: {e}")).ok()?;
     let deadline = std::time::Instant::now() + timeout;
     loop {
@@ -553,6 +566,7 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
         (s.worktree.clone(), s.permission_mode, s.agent, s.agent_command.clone())
     };
     let custom = agent == AgentKind::Custom;
+    let cfg = settings::load(&settings::dir(app)?);
     // meditation: artifacts folder for Claude (--add-dir + system prompt) or custom agents (MURIM_ARTIFACTS); also on resume
     let arts = if is_meditation(issue_id) {
         let d = settings::meditations_dir(&settings::load(&settings::dir(app)?));
@@ -575,6 +589,12 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
         let claude = claude.clone().or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.local/bin/claude")).filter(|p| Path::new(p).exists())).ok_or("claude not found on PATH (login shell)")?;
         let mut c = CommandBuilder::new(claude);
         c.args(head);
+        if cfg.bedrock {
+            // claude.ai connectors (Linear among them) don't load on Bedrock: Linear's MCP server with Murim's API key instead
+            if let Ok(f) = linear_mcp_config() {
+                c.args(["--mcp-config", &f]);
+            }
+        }
         if let Some(d) = &arts {
             // hooks via --settings: nothing written into repos_root
             let sys = format!("Save documents worth keeping (plans, explanations, notes) as markdown files in {d}, with a descriptive kebab-case filename and a # title.");
@@ -616,6 +636,11 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
     c.env("MURIM_PORT", hk.port.to_string());
     c.env("MURIM_TOKEN", &hk.token);
     c.env("MURIM_TASK", issue_id);
+    if local_model.is_none() && !custom {
+        for (k, v) in settings::claude_env(&cfg) {
+            c.env(k, v);
+        }
+    }
     if let Some((url, model)) = &local_model {
         c.env("ANTHROPIC_BASE_URL", url.trim_end_matches('/'));
         // Claude Code also calls haiku/sonnet for background work and subagents: those names don't exist in Ollama

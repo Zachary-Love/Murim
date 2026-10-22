@@ -33,6 +33,10 @@ pub struct Settings {
     pub caffeine: bool,
     /// Appended to every task prompt under "Instructions:" when non-empty.
     pub default_prompt: String,
+    /// Claude Code through Amazon Bedrock (CLAUDE_CODE_USE_BEDROCK=1); empty region/profile = the AWS defaults
+    pub bedrock: bool,
+    pub aws_region: String,
+    pub aws_profile: String,
     /// Appended to the quality-pass turn that opens the draft PR (proof screenshots, PR template, …).
     pub pr_prompt: String,
     /// Appended to every review agent's prompt under "Instructions:" when non-empty.
@@ -108,6 +112,8 @@ pub struct PavilionSettings {
     pub auto_investigate: bool,
     /// start a review agent on others' PRs once CI passes and no person has reviewed
     pub auto_review: bool,
+    /// investigate + plan before coding; off (default): ready issues go straight to the coding agent
+    pub plan_first: bool,
     pub claude_check: CheckMode,
     /// the orchestrator approves an investigation's plan itself (and coding starts) when it's at least this sure; 0 = always ask
     pub auto_approve_at: f32,
@@ -115,7 +121,7 @@ pub struct PavilionSettings {
 
 impl Default for PavilionSettings {
     fn default() -> Self {
-        Self { local_model: true, ollama_url: "http://localhost:11434".into(), model: "qwen3:4b".into(), max_agents: 10, docker_slots: 2, auto_temper: true, auto_investigate: true, auto_review: true, claude_check: CheckMode::Always, auto_approve_at: 0.75 }
+        Self { local_model: true, ollama_url: "http://localhost:11434".into(), model: "qwen3:4b".into(), max_agents: 10, docker_slots: 2, auto_temper: true, auto_investigate: true, auto_review: true, plan_first: false, claude_check: CheckMode::Always, auto_approve_at: 0.75 }
     }
 }
 
@@ -132,6 +138,24 @@ pub fn save(app_config_dir: &Path, s: &Settings) -> Result<(), String> {
     let json = serde_json::to_string_pretty(s).map_err(|e| e.to_string())?;
     std::fs::write(app_config_dir.join("settings.json"), json).map_err(|e| e.to_string())
 }
+
+/// Env every Claude Code process gets (agents and `claude -p`): the Bedrock switch. Set after the login-shell env,
+/// which has its CLAUDE* vars stripped.
+pub fn claude_env(s: &Settings) -> Vec<(String, String)> {
+    if !s.bedrock {
+        return vec![];
+    }
+    let mut v = vec![("CLAUDE_CODE_USE_BEDROCK".to_string(), "1".to_string())];
+    for (k, x) in [("AWS_REGION", &s.aws_region), ("AWS_PROFILE", &s.aws_profile)] {
+        if !x.trim().is_empty() {
+            v.push((k.into(), x.trim().into()));
+        }
+    }
+    v
+}
+
+/// claude_env of the saved settings, for callers without an AppHandle (claude_print); set at launch and on save.
+pub static CLAUDE_ENV: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
 
 pub fn dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_config_dir().map_err(|e| e.to_string())
@@ -156,6 +180,7 @@ pub fn save_settings(app: AppHandle, mut settings: Settings) -> Result<(), Strin
     settings.appearance = cur.appearance; // owned by set_appearance (saves on change)
     crate::docker::set_slots(settings.pavilion.docker_slots);
     crate::pavilion::poke(&app); // a new model or URL: the offline probe picks it up now
+    *CLAUDE_ENV.lock().unwrap() = claude_env(&settings);
     save(&d, &settings)
 }
 
@@ -200,11 +225,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn bedrock_env_only_when_on() {
+        let mut s = Settings::default();
+        assert!(claude_env(&s).is_empty());
+        (s.bedrock, s.aws_region, s.aws_profile) = (true, " us-west-2 ".into(), String::new());
+        assert_eq!(claude_env(&s), vec![("CLAUDE_CODE_USE_BEDROCK".to_string(), "1".to_string()), ("AWS_REGION".to_string(), "us-west-2".to_string())]);
+    }
+
+    #[test]
     fn round_trip_and_defaults() {
         let d = std::env::temp_dir().join(format!("murim-settings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         assert_eq!(load(&d), Settings::default()); // missing
-        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), review_prompt: "check tests".into(), pr_prompt: "add proof".into(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into(), review_filters: ReviewFilters { authors: vec!["u1".into(), "unlinked".into()], statuses: vec!["draft".into()], repos: vec!["o/api".into()] }, review_badge: ReviewBadge::Dot, meditations_dir: "/m".into(), appearance: serde_json::json!({"mode": "custom", "base": "#efe6d8"}), pavilion: PavilionSettings { max_agents: 5, ..Default::default() } };
+        let s = Settings { agent: AgentKind::Custom, agent_command: "codex".into(), repos_root: "/x".into(), default_permission_mode: PermissionMode::Skip, caffeine: true, default_prompt: "be brief".into(), review_prompt: "check tests".into(), pr_prompt: "add proof".into(), bedrock: true, aws_region: "us-east-1".into(), aws_profile: String::new(), reply_mode: crate::tempering::ReplyMode::Full, repo_map: [("bug".to_string(), "/r".to_string())].into(), review_filters: ReviewFilters { authors: vec!["u1".into(), "unlinked".into()], statuses: vec!["draft".into()], repos: vec!["o/api".into()] }, review_badge: ReviewBadge::Dot, meditations_dir: "/m".into(), appearance: serde_json::json!({"mode": "custom", "base": "#efe6d8"}), pavilion: PavilionSettings { max_agents: 5, ..Default::default() } };
         save(&d, &s).unwrap();
         assert_eq!(load(&d), s);
         std::fs::write(d.join("settings.json"), "{not json").unwrap();

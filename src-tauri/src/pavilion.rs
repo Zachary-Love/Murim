@@ -213,6 +213,8 @@ pub struct IssueView<'a> {
     pub board: &'a HashSet<String>,
     /// Settings → auto-approve plans at this confidence; None = always ask
     pub auto_at: Option<f32>,
+    /// Settings → Plan before coding: a ready issue gets an investigation + plan first; off = straight to the coding agent
+    pub plan_first: bool,
 }
 
 fn d(column: Column, reason: impl Into<String>) -> Decision {
@@ -332,7 +334,7 @@ pub fn decide(v: &IssueView) -> Decision {
     if !ask.is_empty() {
         return Decision { ask, ..d(Column::Watching, "checking…") };
     }
-    Decision { by: ready.map(|r| r.by), action: Some(Action::StartNow), ..d(Column::Queued, "ready to investigate") }
+    Decision { by: ready.map(|r| r.by), action: Some(Action::StartNow), ..d(Column::Queued, if v.plan_first { "ready to investigate" } else { "ready to implement" }) }
 }
 
 /// What a manual move is pinned to: the automatic column and reason.
@@ -379,11 +381,14 @@ pub fn plan_of(c: &Card, judged: Option<Pick>, auto_off: bool, starting: bool) -
 }
 
 /// Log a line once per app run (repeated failures and holds that every poll would otherwise re-log).
-pub fn olog_once(msg: String) {
+/// true the first time this message is logged (this app run).
+pub fn olog_once(msg: String) -> bool {
     static SEEN: Mutex<Option<HashSet<String>>> = Mutex::new(None);
-    if SEEN.lock().unwrap().get_or_insert_with(HashSet::new).insert(msg.clone()) {
+    let new = SEEN.lock().unwrap().get_or_insert_with(HashSet::new).insert(msg.clone());
+    if new {
         olog(msg);
     }
+    new
 }
 
 /// A finished plan: the orchestrator checks it, and approves it itself when sure enough; otherwise it's the user's.
@@ -401,11 +406,13 @@ fn decide_plan(v: &IssueView, fp: &str) -> Decision {
 }
 
 /// Someone else's PR. Pavilion never starts review agents; it only shows them.
-pub fn decide_review(s: Option<&SessionInfo>, draft: bool, requested: bool) -> Decision {
+/// `yours`: automatic reviews are off and the PR is ready for a review (see wants_review): it's the user's to do.
+pub fn decide_review(s: Option<&SessionInfo>, draft: bool, requested: bool, yours: bool) -> Decision {
     match s {
         Some(s) if s.status == Status::NeedsInput => d(Column::NeedsYou, format!("review agent {}", asks(s))),
         s if live(s) => d(Column::Working, "review agent running"),
         Some(_) if draft => d(Column::NeedsYou, "review draft ready"),
+        None if yours => d(Column::NeedsYou, "ready for your review"),
         _ => d(Column::Watching, if requested { "review requested" } else { "team PR" }),
     }
 }
@@ -562,7 +569,7 @@ pub fn auto_off(paused: bool, cfg: &settings::Settings) -> Option<&'static str> 
     if paused {
         Some("paused (Resume agents on the Pavilion page)")
     } else if !cfg.pavilion.auto_investigate {
-        Some("auto-investigate is off (Settings → Pavilion)")
+        Some("auto-start is off (Settings → Pavilion)")
     } else if cfg.repos_root.is_empty() {
         Some("no repos folder (Settings → Folders)")
     } else if cfg.agent != AgentKind::Claude {
@@ -714,7 +721,7 @@ fn reconcile(app: &AppHandle) {
             let rec = g.store.items.get(&i.id).unwrap_or(&empty);
             let inv = map.get(&inv_id(&i.id));
             let auto_at = (cfg.pavilion.auto_approve_at > 0.0).then_some(cfg.pavilion.auto_approve_at);
-            let v = IssueView { issue: i, session: map.get(&i.id), inv, pr: prs.get(&i.id), rec, board: &board_ids, auto_at };
+            let v = IssueView { issue: i, session: map.get(&i.id), inv, pr: prs.get(&i.id), rec, board: &board_ids, auto_at, plan_first: cfg.pavilion.plan_first };
             let auto = decide(&v);
             let sig = signature(&auto);
             let moved = manual_decision(&auto, rec.manual.as_ref());
@@ -756,7 +763,7 @@ fn reconcile(app: &AppHandle) {
             save(&g.store);
         }
         for p in &reviews {
-            let dec = decide_review(map.get(&p.session_id), crate::reviews::has_draft(p), p.requested);
+            let dec = decide_review(map.get(&p.session_id), crate::reviews::has_draft(p), p.requested, !cfg.pavilion.auto_review && wants_review(p, map.contains_key(&p.session_id)));
             cards.push(Card { key: p.key.clone(), column: dec.column, ident: format!("{}#{}", p.repo, p.number), title: p.health.title.clone(), repo: p.repo.clone(), reason: dec.reason, view: "reviews".into(), target: p.key.clone(), pr: Some(p.health.clone()), source: Source::Review, stage: Some(Stage::Review), role: map.get(&p.session_id).map(|_| Role::Reviewer), session: map.contains_key(&p.session_id).then(|| p.session_id.clone()), url: p.health.url.clone(), author: match &p.author { crate::reviews::Author::Linear { name, .. } => name.clone(), crate::reviews::Author::Unlinked { login } => format!("@{login}") }, ..Default::default() });
         }
         for (id, s) in &map {
@@ -838,10 +845,13 @@ fn reconcile(app: &AppHandle) {
         crate::tray::refresh(app, &map); // plans to approve
     }
     for id in start {
-        olog(format!("starting investigation for {}", crate::inbox::find(app, &id).map(|i| i.issue.identifier).unwrap_or(id.clone())));
-        if let Err(e) = start_investigation(app, &id) {
-            olog(format!("could not start investigation: {e}"));
-            sessions::notify(app, "Pavilion".into(), format!("Could not start an investigation: {e}"));
+        let ident = crate::inbox::find(app, &id).map(|i| i.issue.identifier).unwrap_or(id.clone());
+        olog(format!("starting {} for {ident}", if cfg.pavilion.plan_first { "investigation" } else { "coding agent (planning off)" }));
+        if let Err(e) = start_issue(app, &id) {
+            // ponytail: a failed coding start stays queued and retries each tick; logged and notified once per message
+            if olog_once(format!("could not start {ident}: {e}")) {
+                sessions::notify(app, "Pavilion".into(), format!("Could not start {ident}: {e}"));
+            }
         }
     }
     for key in review {
@@ -864,6 +874,16 @@ fn reconcile(app: &AppHandle) {
 
 fn set_investigation(app: &AppHandle, issue_id: &str, status: InvStatus, plan: String) {
     with_store(app, |s| s.items.entry(issue_id.into()).or_default().investigation = Some(Investigation { status, plan }));
+}
+
+/// A ready issue: investigation + plan when Settings → Plan before coding is on, else straight to the coding agent.
+fn start_issue(app: &AppHandle, issue_id: &str) -> Result<(), String> {
+    let cfg = settings::load(&settings::dir(app)?);
+    if cfg.pavilion.plan_first {
+        start_investigation(app, issue_id)
+    } else {
+        sessions::start_task(app.clone(), issue_id.to_string(), cfg.default_permission_mode)
+    }
 }
 
 fn start_investigation(app: &AppHandle, issue_id: &str) -> Result<(), String> {
@@ -1070,13 +1090,14 @@ pub fn pavilion_dismiss_blocker(app: AppHandle, issue_id: String) {
 /// Investigate now, even over the agent limit.
 #[tauri::command]
 pub fn pavilion_start_now(app: AppHandle, issue_id: String) -> Result<(), String> {
-    if settings::load(&settings::dir(&app)?).agent == AgentKind::Custom {
+    let cfg = settings::load(&settings::dir(&app)?);
+    if cfg.pavilion.plan_first && cfg.agent == AgentKind::Custom {
         return Err("Investigations need Claude Code (Settings → AI)".into());
     }
     if let Some(c) = card(&app, &issue_id).filter(|c| c.column == Column::NeedsYou && c.verdict.is_some()) {
         learn(&app, format!("The user started {} \"{}\" although it was judged to need them first: {}", c.ident, c.title, c.reason));
     }
-    start_investigation(&app, &issue_id)
+    start_issue(&app, &issue_id)
 }
 
 #[tauri::command]
@@ -1118,10 +1139,10 @@ mod tests {
     }
     fn run(i: &Issue, session: Option<&SessionInfo>, inv: Option<&SessionInfo>, pr: Option<&PrHealth>, rec: &Record) -> Decision {
         let board: HashSet<String> = ["MUR-1".to_string(), "MUR-2".to_string()].into();
-        decide(&IssueView { issue: i, session, inv, pr, rec, board: &board, auto_at: None })
+        decide(&IssueView { issue: i, session, inv, pr, rec, board: &board, auto_at: None, plan_first: true })
     }
     fn view<'a>(i: &'a Issue, board: &'a HashSet<String>, session: Option<&'a SessionInfo>, inv: Option<&'a SessionInfo>, pr: Option<&'a PrHealth>, rec: &'a Record) -> IssueView<'a> {
-        IssueView { issue: i, session, inv, pr, rec, board, auto_at: None }
+        IssueView { issue: i, session, inv, pr, rec, board, auto_at: None, plan_first: true }
     }
     fn col(d: &Decision) -> (Column, &str) {
         (d.column, d.reason.as_str())
@@ -1224,6 +1245,8 @@ mod tests {
         let ready = Record { ready: Some(verdict("ready", &fp)), blocker: Some(verdict("none", &fp)), ..Default::default() };
         let d = run(&i, None, None, None, &ready);
         assert_eq!((col(&d), d.action, d.by), ((Column::Queued, "ready to investigate"), Some(Action::StartNow), Some(By::Claude)));
+        let board: HashSet<String> = HashSet::new();
+        assert_eq!(col(&decide(&IssueView { plan_first: false, ..view(&i, &board, None, None, None, &ready) })), (Column::Queued, "ready to implement"));
         // edited issue: stale verdicts are asked again
         let mut edited = i.clone();
         edited.description = "new".into();
@@ -1246,10 +1269,11 @@ mod tests {
 
     #[test]
     fn reviews_and_agents() {
-        assert_eq!(col(&decide_review(None, false, true)), (Column::Watching, "review requested"));
-        assert_eq!(col(&decide_review(Some(&sess("review:o/r/1", "working")), false, true)), (Column::Working, "review agent running"));
-        assert_eq!(col(&decide_review(Some(&sess("review:o/r/1", "idle")), true, false)), (Column::NeedsYou, "review draft ready"));
-        assert_eq!(decide_review(Some(&sess("review:o/r/1", "needsInput")), true, false).reason, "review agent asks: reply needed");
+        assert_eq!(col(&decide_review(None, false, true, false)), (Column::Watching, "review requested"));
+        assert_eq!(col(&decide_review(None, false, true, true)), (Column::NeedsYou, "ready for your review"));
+        assert_eq!(col(&decide_review(Some(&sess("review:o/r/1", "working")), false, true, true)), (Column::Working, "review agent running"));
+        assert_eq!(col(&decide_review(Some(&sess("review:o/r/1", "idle")), true, false, false)), (Column::NeedsYou, "review draft ready"));
+        assert_eq!(decide_review(Some(&sess("review:o/r/1", "needsInput")), true, false, false).reason, "review agent asks: reply needed");
         assert_eq!(decide_agent(&sess("automation:a:1", "needsInput")).unwrap().column, Column::NeedsYou);
         assert_eq!(decide_agent(&sess("meditation:1", "working")).unwrap().column, Column::Working);
         assert!(decide_agent(&sess("meditation:1", "idle")).is_none());

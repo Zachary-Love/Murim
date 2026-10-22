@@ -149,7 +149,7 @@ pub fn run(app: &AppHandle) {
                 crate::tempering::log(app, &id, format!("Pavilion picked up {}#{}: {}", w.repo, w.health.number, w.health.title));
                 adopted = true;
             }
-            Err(e) => crate::pavilion::olog_once(format!("adopt {id}: {e}")), // the next passes retry quietly
+            Err(e) => drop(crate::pavilion::olog_once(format!("adopt {id}: {e}"))), // the next passes retry quietly
         }
     }
     if adopted {

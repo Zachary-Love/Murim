@@ -65,7 +65,7 @@ export const PICK: Record<Pick, { label: string; tone: Tone }> = {
 };
 const PICK_TITLE: Partial<Record<Pick, string>> = {
   waitingSlot: "Queued behind the agent limit (Settings → Pavilion → max agents)",
-  autoOff: "Queued, but Pavilion won't start it: paused, auto-investigate off, no repos folder, or not Claude Code (see the Orchestrator Log)",
+  autoOff: "Queued, but Pavilion won't start it: paused, auto-start off, no repos folder, or not Claude Code (see the Orchestrator Log)",
   watching: "Nothing to do now: the orchestrator re-checks it every minute (Tempering acts on CI, comments and conflicts of a PR)",
   moved: "You placed this card; it goes back to automatic when something new happens",
 };
