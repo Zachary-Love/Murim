@@ -4,7 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import AppearanceSettings from "./AppearanceSettings";
 import { MODE_LABEL, AgentKind, ReplyMode } from "./types";
 
-type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; review_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { local_model: boolean; ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_temper: boolean; auto_investigate: boolean; auto_review: boolean; claude_check: "always" | "lowConfidence" | "off"; auto_approve_at: number } };
+type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; pr_prompt: string; review_prompt: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { local_model: boolean; ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_temper: boolean; auto_investigate: boolean; auto_review: boolean; claude_check: "always" | "lowConfidence" | "off"; auto_approve_at: number } };
 
 export const SECTIONS = ["Appearance", "Prompts", "Folders", "AI", "Pavilion", "Orchestrator Log", "Accounts"] as const;
 export type Section = typeof SECTIONS[number];
@@ -242,20 +242,23 @@ export default function Settings({ tab }: { tab: Section }) {
       </label>
       <p className="muted">Claude (Haiku) checks the local model before Pavilion starts an investigation or marks an issue blocked.</p>
       </>}
-      <p className="muted">Investigations can't edit files and ask before running commands; coding starts when you approve the plan.</p>
+      <p className="muted">Investigations can't edit files and run in your default permission mode; coding starts when you approve the plan.</p>
         </>;
       })()}
       {tab === "Orchestrator Log" && <OrchestratorLog />}
       {tab === "Prompts" && (
       <label>Default prompt
-        <textarea value={s.default_prompt} placeholder="Appended to every task prompt, e.g. run the tests before finishing" onChange={(e) => setS({ ...s, default_prompt: e.target.value })} />
+        <textarea value={s.default_prompt} placeholder="Appended to the first prompt of every task, e.g. coding conventions or run the tests before finishing" onChange={(e) => setS({ ...s, default_prompt: e.target.value })} />
       </label>
       )}
-      {tab === "Prompts" && (
+      {tab === "Prompts" && <>
+      <label>Pull request prompt
+        <textarea value={s.pr_prompt} placeholder="Followed right before the agent opens a draft PR, e.g. record proof with proofshot and add it to the PR description" onChange={(e) => setS({ ...s, pr_prompt: e.target.value })} />
+      </label>
       <label>Review prompt
         <textarea value={s.review_prompt} placeholder="Appended to every review agent's prompt, e.g. focus on security and tests" onChange={(e) => setS({ ...s, review_prompt: e.target.value })} />
       </label>
-      )}
+</>}
       {tab === "Appearance" && <AppearanceSettings />}
       {tab === "Appearance" && (
       <label>Review requests badge

@@ -237,8 +237,11 @@ pub fn notify(app: &AppHandle, title: String, body: String) {
 
 const DONE_SUFFIX: &str = "\n\nWhen the issue is fully implemented, end your final message with the line MURIM_DONE.";
 
-fn quality_prompt(ident: &str, base: &str) -> String {
-    format!("Quality pass. Run /ponytail:ponytail-review on this branch's diff vs {base} (if that skill is not available, say so and do an equivalent self-review for bugs, needless complexity and dead code), and apply its fixes. Run the project's tests and linters and fix failures. Commit all changes (no AI attribution or Co-Authored-By lines), push the branch, then open a draft PR with `gh pr create --draft` with a clear title and description; the body must include `Fixes {ident}`. Do NOT mark it ready: the user reviews it first. End your final message with the line MURIM_PR_OPENED.")
+/// `extra`: Settings → Pull request prompt. Goes in this turn, not only the first prompt: this is the turn that opens the PR.
+fn quality_prompt(ident: &str, base: &str, extra: &str) -> String {
+    let extra = extra.trim();
+    let extra = if extra.is_empty() { String::new() } else { format!(" Before opening the PR, follow these instructions; their output (screenshots, videos, notes) belongs in the PR description:\n{extra}\n\n") };
+    format!("Quality pass. Run /ponytail:ponytail-review on this branch's diff vs {base} (if that skill is not available, say so and do an equivalent self-review for bugs, needless complexity and dead code), and apply its fixes. Run the project's tests and linters and fix failures. Commit all changes (no AI attribution or Co-Authored-By lines), push the branch.{extra} Then open a draft PR with `gh pr create --draft` with a clear title and description; the body must include `Fixes {ident}`. Do NOT mark it ready: the user reviews it first. End your final message with the line MURIM_PR_OPENED.")
 }
 
 /// Claude runs in repos_root (worktree "") until it names the repo; see hooks::repo_marker.
@@ -338,7 +341,7 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
         let base = git(Path::new(&wt), &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]).unwrap_or_else(|_| "the default branch".into());
         let (a, t) = (app.clone(), task.to_string());
         std::thread::spawn(move || {
-            if let Err(e) = resume_task(a.clone(), t.clone(), Some(quality_prompt(&ident, &base))) {
+            if let Err(e) = resume_task(a.clone(), t.clone(), Some(quality_prompt(&ident, &base, &settings::dir(&a).map(|d| settings::load(&d).pr_prompt).unwrap_or_default()))) {
                 with_session(&a, &t, |s| s.pr_flow = PrFlow::None);
                 crate::tempering::log(&a, &t, format!("Could not start quality pass: {e}"));
             }
@@ -558,7 +561,7 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
     } else {
         None
     };
-    let mut local_model: Option<String> = None;
+    let mut local_model: Option<(String, String)> = None;
     let (vars, claude) = shell_env();
     let hk = app.state::<Hooks>();
     let pair = native_pty_system().openpty(PtySize { rows: 40, cols: 120, pixel_width: 0, pixel_height: 0 }).map_err(|e| e.to_string())?;
@@ -584,7 +587,7 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
             let m = crate::automations::model_of(app, issue_id);
             if let Some(local) = m.strip_prefix("ollama:") {
                 // Ollama speaks the Anthropic Messages API; set after the login-shell env below so it wins
-                local_model = Some(settings::load(&settings::dir(app)?).pavilion.ollama_url);
+                local_model = Some((settings::load(&settings::dir(app)?).pavilion.ollama_url, local.to_string()));
                 c.args(["--model", local]);
             } else if !m.is_empty() {
                 c.args(["--model", &m]);
@@ -613,8 +616,12 @@ fn spawn(app: &AppHandle, issue_id: &str, head: Vec<String>) -> Result<(), Strin
     c.env("MURIM_PORT", hk.port.to_string());
     c.env("MURIM_TOKEN", &hk.token);
     c.env("MURIM_TASK", issue_id);
-    if let Some(url) = &local_model {
+    if let Some((url, model)) = &local_model {
         c.env("ANTHROPIC_BASE_URL", url.trim_end_matches('/'));
+        // Claude Code also calls haiku/sonnet for background work and subagents: those names don't exist in Ollama
+        for k in ["ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "ANTHROPIC_SMALL_FAST_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL"] {
+            c.env(k, model);
+        }
         c.env("ANTHROPIC_AUTH_TOKEN", "ollama");
         c.env("ANTHROPIC_API_KEY", "");
     }
@@ -1025,7 +1032,8 @@ mod tests {
     #[test]
     fn prompts() {
         assert!(DONE_SUFFIX.ends_with("the line MURIM_DONE."));
-        let p = quality_prompt("ENG-1", "origin/main");
+        let p = quality_prompt("ENG-1", "origin/main", "");
+        assert!(quality_prompt("ENG-1", "main", "run proofshot").contains("belongs in the PR description:\nrun proofshot"));
         for k in ["/ponytail:ponytail-review", "vs origin/main", "gh pr create --draft", "Do NOT mark it ready", "Fixes ENG-1", "not available", "no AI attribution"] {
             assert!(p.contains(k), "{k}");
         }

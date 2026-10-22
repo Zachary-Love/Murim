@@ -316,7 +316,8 @@ pub fn log(app: &AppHandle, id: &str, message: impl Into<String>) {
 pub fn gh(wt: &str, args: &[&str]) -> Result<String, String> {
     let o = Command::new("gh").args(args).current_dir(wt).envs(sessions::shell_env().0.iter().map(|(k, v)| (k, v))).stdin(std::process::Stdio::null()).output().map_err(|e| format!("gh: {e}"))?;
     let (out, err) = (String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
-    if o.status.success() { Ok(out.into_owned()) } else { Err(format!("gh {}: {}", args.join(" "), err.trim())) }
+    // `gh api` prints GitHub's error JSON (the actual reason) on stdout
+    if o.status.success() { Ok(out.into_owned()) } else { Err(format!("gh {}: {} {}", args.join(" "), err.trim(), out.trim()).trim_end().to_string()) }
 }
 
 /// Post a reply (and optionally resolve). Records the new comment as handled so it doesn't re-trigger.

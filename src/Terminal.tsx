@@ -5,6 +5,8 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import "@xterm/xterm/css/xterm.css";
 import { Appearance, currentAppearance, family, loadFont } from "./appearance";
 import { macKey } from "./macKeys";
@@ -35,12 +37,15 @@ export default function Terminal({ issueId }: { issueId: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = ref.current!;
+    // ⌘-click, like Terminal.app and iTerm; a plain click stays a click (selection, the agent's TUI)
+    const openLink = (e: MouseEvent, uri: string) => { if (e.metaKey && /^https?:\/\//.test(uri)) openUrl(uri).catch(() => {}); };
     let dead = false;
     let prof: Profile | null = null;
-    const term = new XTerm({ cursorBlink: true, allowProposedApi: true, macOptionIsMeta: false, macOptionClickForcesSelection: true, vtExtensions: { kittyKeyboard: true }, ...look(currentAppearance(), null) });
+    const term = new XTerm({ cursorBlink: true, allowProposedApi: true, macOptionIsMeta: false, macOptionClickForcesSelection: true, vtExtensions: { kittyKeyboard: true }, linkHandler: { activate: (e, uri) => openLink(e, uri) }, ...look(currentAppearance(), null) });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.loadAddon(new Unicode11Addon());
+    term.loadAddon(new WebLinksAddon(openLink)); // plain-text URLs; OSC 8 links go through linkHandler above
     term.unicode.activeVersion = "11";
     let webgl: WebglAddon | null = null;
     const send = (data: string) => invoke("pty_write", { issueId, data }).catch(() => {});

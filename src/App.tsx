@@ -15,12 +15,15 @@ import MeditationList, { useArtifacts } from "./MeditationList";
 import { SessionPane, ArtifactPane } from "./MeditationPane";
 import AutomationList from "./AutomationList";
 import AutomationPane, { RunPane, draft } from "./AutomationPane";
+import CommandMenu, { type Command } from "./CommandMenu";
 import logo from "./assets/logo-mark.svg";
 
 type Payload = { items: Item[]; error: string | null };
 type PrPayload = { prs: PrMap; error?: string | null };
 type RvPayload = { prs: ReviewPr[]; error: string | null; loaded: boolean };
 type View = "pavilion" | "tasks" | "reviews" | "meditations" | "automations";
+const KEYS: Record<string, View> = { p: "pavilion", t: "tasks", r: "reviews", m: "meditations", a: "automations" };
+const VIEW_NAME: Record<View, string> = { pavilion: "Pavilion", tasks: "Tasks", reviews: "Reviews", meditations: "Meditations", automations: "Automations" };
 const savedView = (): View => { try { const v = localStorage.getItem("murim.view"); return v === "tasks" || v === "reviews" || v === "meditations" || v === "automations" ? v : "pavilion"; } catch { return "pavilion"; } };
 
 export default function App() {
@@ -54,6 +57,24 @@ export default function App() {
     else if (v === "meditations") setOpenMed({ kind: "session", id });
     else if (v === "automations") setOpenAuto({ kind: "run", id });
   };
+  const [cmdk, setCmdk] = useState(false);
+  // ⌘P/T/R/M/A switch views, ⌘K opens the command menu, ⌘, opens Settings. Capture phase: wins over the terminal.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const k = e.key.toLowerCase(), t = e.target as HTMLElement | null;
+      // ⌘A keeps select-all in text fields (not the terminal's hidden textarea)
+      const field = !!t && (t.isContentEditable || ((t.tagName === "INPUT" || t.tagName === "TEXTAREA") && !t.classList.contains("xterm-helper-textarea")));
+      if (k === "k") setCmdk((o) => !o);
+      else if (k === ",") setShowSettings(true);
+      else if (KEYS[k] && !(k === "a" && field)) { setCmdk(false); switchView(KEYS[k]); }
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
   const needsYou = board.cards.filter((c) => c.column === "needsYou").length;
   useEffect(() => {
     invoke<Record<string, Session>>("get_sessions").then(setSessions).catch(() => {});
@@ -103,18 +124,29 @@ export default function App() {
   const editAuto = openAuto?.kind === "automation" ? (openAuto.id ? autos.find((a) => a.id === openAuto.id) : draft()) : undefined;
   const medSession = openMed?.kind === "session" ? sessions[openMed.id] : undefined;
 
+  const commands: Command[] = [
+    ...(Object.entries(KEYS) as [string, View][]).map(([k, v]) => ({ id: `go:${v}`, group: "Go to", label: VIEW_NAME[v], hint: `⌘${k.toUpperCase()}`, run: () => switchView(v) })),
+    { id: "go:settings", group: "Go to", label: "Settings", hint: "⌘,", run: () => setShowSettings(true) },
+    { id: "act:refresh", group: "Action", label: "Refresh tasks, PRs and reviews", run: () => { ["refresh_inbox", "refresh_prs", "refresh_reviews"].forEach((c) => invoke(c).catch(() => {})); } },
+    { id: "act:pause", group: "Action", label: board.paused ? "Resume Pavilion" : "Pause Pavilion", run: () => { invoke("pavilion_set_paused", { paused: !board.paused }).catch(() => {}); } },
+    { id: "act:automation", group: "Action", label: "New automation", run: () => { switchView("automations"); setOpenAuto({ kind: "automation", id: "" }); } },
+    ...p.items.map((i) => ({ id: `task:${i.issue.id}`, group: "Task", label: `${i.issue.identifier} ${i.issue.title}`, run: () => go("tasks", i.issue.id) })),
+    ...rv.prs.map((r) => ({ id: `review:${r.key}`, group: "Review", label: `${r.repo}#${r.number} ${r.health.title}`, run: () => go("reviews", r.key) })),
+    ...autos.map((a) => ({ id: `auto:${a.id}`, group: "Automation", label: a.name, run: () => { switchView("automations"); setOpenAuto({ kind: "automation", id: a.id }); } })),
+  ];
+
   return (
     <div className="app">
       <nav className="rail" data-tauri-drag-region>
-        <button className={`btn icon ${!showSettings && view === "pavilion" ? "on" : ""}`} title="Pavilion" onClick={() => switchView("pavilion")}><PavilionIcon />{needsYou > 0 && <span className="count attn badge">{needsYou}</span>}</button>
-        <button className={`btn icon ${!showSettings && view === "tasks" ? "on" : ""}`} title="Tasks" onClick={() => switchView("tasks")}><TasksIcon /></button>
-        <button className={`btn icon ${!showSettings && view === "reviews" ? "on" : ""}`} title="Reviews" onClick={() => switchView("reviews")}><ReviewsIcon />{requested > 0 && badge !== "off" && (badge === "dot" ? <span className="dot-req badge-dot" /> : <span className="count attn badge">{requested}</span>)}</button>
-        <button className={`btn icon ${!showSettings && view === "meditations" ? "on" : ""}`} title="Meditations" onClick={() => switchView("meditations")}><MeditationsIcon /></button>
-        <button className={`btn icon ${!showSettings && view === "automations" ? "on" : ""}`} title="Automations" onClick={() => switchView("automations")}><ClockIcon />{autoWaiting && <span className="dot-req badge-dot" />}</button>
+        <button className={`btn icon ${!showSettings && view === "pavilion" ? "on" : ""}`} title="Pavilion (⌘P)" onClick={() => switchView("pavilion")}><PavilionIcon />{needsYou > 0 && <span className="count attn badge">{needsYou}</span>}</button>
+        <button className={`btn icon ${!showSettings && view === "tasks" ? "on" : ""}`} title="Tasks (⌘T)" onClick={() => switchView("tasks")}><TasksIcon /></button>
+        <button className={`btn icon ${!showSettings && view === "reviews" ? "on" : ""}`} title="Reviews (⌘R)" onClick={() => switchView("reviews")}><ReviewsIcon />{requested > 0 && badge !== "off" && (badge === "dot" ? <span className="dot-req badge-dot" /> : <span className="count attn badge">{requested}</span>)}</button>
+        <button className={`btn icon ${!showSettings && view === "meditations" ? "on" : ""}`} title="Meditations (⌘M)" onClick={() => switchView("meditations")}><MeditationsIcon /></button>
+        <button className={`btn icon ${!showSettings && view === "automations" ? "on" : ""}`} title="Automations (⌘A)" onClick={() => switchView("automations")}><ClockIcon />{autoWaiting && <span className="dot-req badge-dot" />}</button>
         <div className="rail-bottom">
           <Updater />
           <Caffeine />
-          <button className={`btn icon ${showSettings ? "on" : ""}`} title="Settings" onClick={() => setShowSettings(!showSettings)}><GearIcon /></button>
+          <button className={`btn icon ${showSettings ? "on" : ""}`} title="Settings (⌘,)" onClick={() => setShowSettings(!showSettings)}><GearIcon /></button>
         </div>
       </nav>
       {(view !== "pavilion" || showSettings) && (
@@ -175,6 +207,7 @@ export default function App() {
           <TaskPane key={openItem.issue.id} item={openItem} session={sessions[openItem.issue.id]} pr={prs[openItem.issue.id]} log={logs[openItem.issue.id] ?? []} repos={repos} defaultMode={mode} agent={agent} />
         ) : <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Select a task to start working on it.</p></div>}
       </main>
+      {cmdk && <CommandMenu commands={commands} onClose={() => setCmdk(false)} />}
     </div>
   );
 }

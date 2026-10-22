@@ -234,6 +234,19 @@ fn team(tok: &str, skip: &[String]) -> Result<Vec<ReviewPr>, String> {
     Ok(out)
 }
 
+/// PRs our review agents worked on that dropped out of both lists (e.g. a teammate answered the team's review
+/// request, or the Linear issue moved on): still fetched while open so their drafts stay on the board.
+fn reviewed_elsewhere(tok: &str, session_ids: &[String], have: &[ReviewPr]) -> Result<Vec<ReviewPr>, String> {
+    let urls: Vec<String> = stale(session_ids, have).iter().filter_map(|id| parse_session(id)).map(|(o, r, n)| format!("https://github.com/{o}/{r}/pull/{n}")).collect();
+    let mut out = vec![];
+    for chunk in urls.chunks(50) {
+        let vars: serde_json::Map<String, Value> = chunk.iter().enumerate().map(|(i, u)| (format!("u{i}"), json!(u))).collect();
+        let j = github::gql(tok, &urls_query(chunk.len()), Value::Object(vars))?;
+        out.extend((0..chunk.len()).filter_map(|i| to_review(&j["data"][format!("p{i}")], false)));
+    }
+    Ok(out)
+}
+
 /// Branch-name fallback for rows still unlinked (cached per run).
 fn link_by_branch(app: &AppHandle, prs: &mut [ReviewPr]) {
     let Ok(key) = linear::api_key() else { return };
@@ -274,6 +287,12 @@ fn poll(app: &AppHandle) {
             let skip: Vec<String> = gh.as_ref().map(|(_, v)| v.iter().map(|p| p.health.url.clone()).collect()).unwrap_or_default();
             let t = team(&tok, &skip);
             let mut p = combine(gh, t);
+            let ids: Vec<String> = sessions::get_sessions(app.state()).into_keys().collect();
+            match reviewed_elsewhere(&tok, &ids, &p.prs) {
+                // only while there's something to see: a draft to post or the agent still running
+                Ok(more) => p.prs.extend(more.into_iter().filter(|x| x.health.state == github::PrState::Open && (has_draft(x) || sessions::pty_alive(app, &x.session_id)))),
+                Err(e) => p.error = Some(p.error.map_or(e.clone(), |o| format!("{o}; {e}"))),
+            }
             link_by_branch(app, &mut p.prs);
             p
         }
@@ -426,20 +445,31 @@ pub fn get_review_draft(app: AppHandle, key: String) -> Result<Option<Draft>, St
     }
 }
 
+/// The summary plus each inline comment as "`path:line` body", for when GitHub rejects the inline ones.
+fn folded_body(d: &Draft) -> String {
+    let notes: Vec<String> = d.comments.iter().map(|c| format!("**`{}:{}`** {}", c.path, c.line, c.body)).collect();
+    format!("{}\n\n{}", d.summary, notes.join("\n\n"))
+}
+
 #[tauri::command]
 pub fn post_review(app: AppHandle, key: String, draft: Draft) -> Result<(), String> {
     let p = find(&app, &key)?;
     let draft = parse_draft(&serde_json::to_string(&draft).map_err(|e| e.to_string())?)?; // same event validation as the file
-    let body = json!({
-        "body": draft.summary,
-        "event": draft.event,
-        "comments": draft.comments.iter().map(|c| json!({"path": c.path, "line": c.line, "side": "RIGHT", "body": c.body})).collect::<Vec<_>>(),
-    });
-    let f = std::env::temp_dir().join(format!("murim-review-{}-{}.json", p.repo, p.number));
-    std::fs::write(&f, body.to_string()).map_err(|e| e.to_string())?;
-    let r = crate::tempering::gh(&home()?.to_string_lossy(), &["api", "-X", "POST", &format!("repos/{}/{}/pulls/{}/reviews", p.owner, p.repo, p.number), "--input", &f.to_string_lossy()]);
-    let _ = std::fs::remove_file(&f);
-    r?;
+    let post = |body: Value| -> Result<String, String> {
+        let f = std::env::temp_dir().join(format!("murim-review-{}-{}.json", p.repo, p.number));
+        std::fs::write(&f, body.to_string()).map_err(|e| e.to_string())?;
+        let r = crate::tempering::gh(&home()?.to_string_lossy(), &["api", "-X", "POST", &format!("repos/{}/{}/pulls/{}/reviews", p.owner, p.repo, p.number), "--input", &f.to_string_lossy()]);
+        let _ = std::fs::remove_file(&f);
+        r
+    };
+    let inline = draft.comments.iter().map(|c| json!({"path": c.path, "line": c.line, "side": "RIGHT", "body": c.body})).collect::<Vec<_>>();
+    match post(json!({"body": draft.summary, "event": draft.event, "comments": inline})) {
+        // 422 is usually a comment on a line outside the diff: post those comments in the review body instead
+        Err(e) if e.contains("422") && !draft.comments.is_empty() => {
+            post(json!({"body": folded_body(&draft), "event": draft.event})).map_err(|e2| format!("{e}\n\nRetried without inline comments: {e2}"))?;
+        }
+        r => drop(r?),
+    }
     // posted: the draft is no longer waiting on the user, so Pavilion's "review draft ready" (has_draft) must clear
     if let Ok(w) = wt_of(&p) {
         let _ = std::fs::rename(w.join(".murim/review.json"), w.join(".murim/review.posted.json"));

@@ -475,3 +475,15 @@ button.chip:hover { background: var(--hover); border-color: var(--line-hi); colo
 .tasks .row-pick { flex-basis: 100%; display: flex; padding-left: 22px; }
 .tasks .row-pick .chip { height: 18px; font-size: 10px; padding: 0 7px 0 5px; }
 .pvi-term .pane > .term { margin: 0; padding: 0; border: 0; border-radius: 0; } /* inspector: terminal edge to edge */
+
+/* ⌘K command menu */
+.cmdk-back { position: fixed; inset: 0; z-index: 100; background: color-mix(in srgb, var(--bg) 55%, transparent); display: flex; justify-content: center; align-items: flex-start; padding: max(12vh, 48px) 16px 16px; }
+.cmdk { width: min(620px, 100%); max-height: max(60vh, 240px); display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line-hi); border-radius: 12px; box-shadow: 0 24px 64px rgb(0 0 0 / .45); overflow: hidden; }
+.cmdk input { flex: none; height: 48px; padding: 0 16px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: none; font-size: 15px; color: var(--text); outline: none; }
+.cmdk ul { list-style: none; margin: 0; padding: 6px; overflow-y: auto; }
+.cmdk li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 7px; cursor: pointer; font-size: 13px; color: var(--text-2); }
+.cmdk li.on { background: var(--hover); color: var(--text); }
+.cmdk li.empty { cursor: default; color: var(--dim); }
+.cmdk-group { flex: none; width: 82px; font-size: 11px; color: var(--dim); }
+.cmdk-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cmdk kbd { flex: none; font: 11px var(--mono); color: var(--dim); }
