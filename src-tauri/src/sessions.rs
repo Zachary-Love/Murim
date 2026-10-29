@@ -354,7 +354,7 @@ pub fn on_hook(app: &AppHandle, task: &str, ev: &Value) {
             if let Some(p) = update(&a, |g| g.ptys.remove(&t)) {
                 hangup_owned(p);
             }
-            let r = crate::inbox::set_issue_repo(a.clone(), a.state(), t.clone(), repo.to_string_lossy().into()).and_then(|_| start_task(a.clone(), t.clone(), mode));
+            let r = crate::inbox::set_issue_repo(a.clone(), a.state(), t.clone(), repo.to_string_lossy().into()).and_then(|_| start_task(a.clone(), t.clone(), Some(mode)));
             if let Err(e) = r {
                 with_session(&a, &t, |s| s.status = Status::NeedsInput);
                 notify(&a, t, format!("Could not start in the picked repo: {e}"));
@@ -791,10 +791,11 @@ fn write_pty(app: &AppHandle, id: &str, data: &[u8]) -> Result<(), String> {
 // ---- commands ----
 
 #[tauri::command]
-pub fn start_task(app: AppHandle, issue_id: String, permission_mode: PermissionMode) -> Result<(), String> {
+pub fn start_task(app: AppHandle, issue_id: String, permission_mode: Option<PermissionMode>) -> Result<(), String> {
     let it = crate::inbox::find(&app, &issue_id).ok_or("unknown issue")?;
     let i = &it.issue;
     let cfg = settings::load(&settings::dir(&app)?);
+    let permission_mode = permission_mode.unwrap_or(cfg.default_permission_mode);
     let custom = cfg.agent == AgentKind::Custom;
     if custom && cfg.agent_command.trim().is_empty() {
         return Err("Set the agent command in Settings".into());

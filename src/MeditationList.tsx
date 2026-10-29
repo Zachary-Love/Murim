@@ -27,6 +27,11 @@ export function useArtifacts(active: boolean, sessions: Record<string, Session>)
   return { arts, query, setQuery, err, reload };
 }
 
+function useStored<T>(key: string, init: T) {
+  const [v, setV] = useState<T>(() => { try { const s = localStorage.getItem(key); return s === null ? init : JSON.parse(s); } catch { return init; } });
+  return [v, (x: T) => { setV(x); try { localStorage.setItem(key, JSON.stringify(x)); } catch {} }] as const;
+}
+
 const ago = (secs: number) => {
   const s = Math.max(0, Date.now() / 1000 - secs);
   return s < 60 ? "just now" : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago`
@@ -39,8 +44,9 @@ export default function MeditationList({ sessions, sel, onOpen, noRepos, arts, q
   const [err, setErr] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [sOpen, setSOpen] = useState(true);
-  const [aPick, setAPick] = useState<boolean | null>(null); // null: open only when there are artifacts (or a search)
+  // the sidebar unmounts on view switches: keep the collapsed sections in localStorage
+  const [sOpen, setSOpen] = useStored("murim.medSessions", true);
+  const [aPick, setAPick] = useStored<boolean | null>("murim.medArtifacts", null); // null: open only when there are artifacts (or a search)
   const aOpen = aPick ?? (arts.length > 0 || query.trim() !== "");
   const meds = Object.values(sessions).filter((s) => isMed(s.issueId)).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
   const add = () => invoke<string>("start_meditation").then((id) => { setErr(""); onOpen({ kind: "session", id }); }).catch((e) => setErr(String(e)));
@@ -69,7 +75,7 @@ export default function MeditationList({ sessions, sel, onOpen, noRepos, arts, q
                 <button className={`row ${on ? "on" : ""} ${s.status === "needsInput" ? "attn" : ""}`} title="Double-click to rename"
                   onClick={() => onOpen({ kind: "session", id })} onDoubleClick={() => { setEditing(id); setName(s.name ?? ""); }}>
                   <span className="t">{s.name || id}</span>
-                  {s.status === "needsInput" && <AgentIcon status={s.status} />}
+                  <AgentIcon status={s.status} />
                 </button>
               )}
               {editing !== id && <button className="x" title="Stop and remove this session (artifacts are kept)" onClick={() => del(id)}>×</button>}

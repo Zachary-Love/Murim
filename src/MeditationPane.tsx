@@ -8,10 +8,12 @@ import { AgentIcon } from "./Icons";
 import logo from "./assets/logo-mark.svg";
 
 // Shared by Meditations and Automations runs.
-export function SessionPane({ id, session, title, noun = "meditation" }: { id: string; session: Session; title: string; noun?: string }) {
+// `fresh`: [command, args] that starts a new agent instead of resuming the old conversation (cheaper: no old context).
+export function SessionPane({ id, session, title, noun = "meditation", fresh }: { id: string; session: Session; title: string; noun?: string; fresh?: [string, object] }) {
   const [err, setErr] = useState("");
   const run = (cmd: string, args: object = {}) => invoke(cmd, { issueId: id, ...args }).then(() => setErr("")).catch((e) => setErr(String(e)));
   const resume = () => run("resume_task", { prompt: null });
+  const start = fresh && (() => run(fresh[0], fresh[1]));
   return (
     <div className="pane">
       <header className="topbar" data-tauri-drag-region>
@@ -19,7 +21,7 @@ export function SessionPane({ id, session, title, noun = "meditation" }: { id: s
         <div className="topbar-right" data-tauri-drag-region>
           {session.ptyAlive
             ? <button className="btn danger" onClick={() => run("stop_task")}>■ Stop agent</button>
-            : <button className="btn primary" onClick={resume}>↻ Resume agent</button>}
+            : <>{start && <button className="btn" title="Start a new conversation (uses fewer tokens than resuming)" onClick={start}>＋ New agent</button>}<button className="btn primary" onClick={resume}>↻ Resume agent</button></>}
         </div>
       </header>
       {err && <div className="banner">{err}</div>}
@@ -27,7 +29,7 @@ export function SessionPane({ id, session, title, noun = "meditation" }: { id: s
         <div className="empty-state">
           <img className="logo-lg" src={logo} alt="" />
           <p>The agent isn't running for this {noun}.</p>
-          <button className="btn primary" onClick={resume}>↻ Resume agent</button>
+          <div className="group gap">{start && <button className="btn" onClick={start}>＋ New agent</button>}<button className="btn primary" onClick={resume}>↻ Resume agent</button></div>
         </div>
       )}
     </div>

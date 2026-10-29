@@ -110,7 +110,7 @@ fn click(app: &AppHandle, id: &str) {
         let _ = w.set_focus();
     }
     if let Some(t) = id.strip_prefix("task|") {
-        let _ = app.emit("navigate", json!({ "view": "tasks", "id": t }));
+        let _ = app.emit("navigate", json!({ "view": "pavilion", "id": t }));
     } else if let Some(r) = id.strip_prefix("run|") {
         let _ = app.emit("navigate", json!({ "view": "automations", "id": r }));
     } else if let Some(p) = id.strip_prefix("pavilion|") {

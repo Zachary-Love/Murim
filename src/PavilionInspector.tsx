@@ -34,7 +34,7 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
   const [tab, setTab] = useState<Tab>(draftReady ? "review" : c.plan ? "plan" : coding?.escalations?.length ? "overview" : toReview && coding?.status !== "needsInput" ? "review" : hasTerm && c.column === "needsYou" ? "terminal" : "overview");
   const tabs = TABS.filter(([k]) => k === "overview" || (k === "plan" ? !!c.plan : k === "issue" ? c.source === "issue" : k === "review" ? c.source === "review" || (c.source === "issue" && !!coding?.worktree) : k === "terminal" ? hasTerm : log.length > 0));
   const cur = tabs.some(([k]) => k === tab) ? tab : "overview";
-  const view = VIEW_LABEL[c.view] ?? c.view, elsewhere = !["pavilion", "tasks", "reviews"].includes(c.view); // tasks/reviews are covered by these tabs
+  const view = VIEW_LABEL[c.view] ?? c.view, elsewhere = !["pavilion", "reviews"].includes(c.view); // reviews are covered by these tabs
   const exec = async (cmd: string, args: Record<string, unknown>) => { setBusy(true); try { await run(cmd, args); } finally { setBusy(false); } };
   const approve = () => exec("pavilion_approve", { issueId: c.key, plan: text });
   const start = () => exec("pavilion_start_now", { issueId: c.key });
@@ -46,6 +46,8 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
     : c.action === "dismissBlocker" ? { label: "Dismiss blocker", go: dismiss, off: false } : null;
   const failing = pr?.failingChecks ?? [];
   const ci = pr?.ci;
+  // a new conversation for the card's own agent: the coding task or the PR review (investigations resume only)
+  const fresh: [string, object] | undefined = c.source === "review" ? ["start_review_agent", { key: c.target }] : coding && c.source === "issue" ? ["start_task", { permissionMode: null }] : undefined;
   const allPass = !!pr && !failing.length && (ci === "passing" || pr.overall === "readyToMerge");
 
   return (
@@ -159,7 +161,7 @@ export default function PavilionInspector({ card, sessions, log, run, onOpen, on
           <div className="pvi-term"><ReviewView issueId={c.key} refreshKey={`${coding.prFlow}:${coding.status}`} onRequested={() => setTab("terminal")} /></div>
         )}
         {cur === "terminal" && hasTerm && c.session && (
-          <div className="pvi-term"><SessionPane id={c.session} session={sessions[c.session]} title={c.session.startsWith("investigation:") ? `Investigate ${c.ident || c.title}` : c.ident || c.title} noun={c.session.startsWith("investigation:") ? "investigation" : c.source === "review" ? "review" : c.source === "agent" ? "run" : "task"} /></div>
+          <div className="pvi-term"><SessionPane id={c.session} session={sessions[c.session]} title={c.session.startsWith("investigation:") ? `Investigate ${c.ident || c.title}` : c.ident || c.title} noun={c.session.startsWith("investigation:") ? "investigation" : c.source === "review" ? "review" : c.source === "agent" ? "run" : "task"} fresh={c.session.startsWith("investigation:") ? undefined : fresh} /></div>
         )}
         {cur === "activity" && (
           <ul className="pvi-sec pvi-log">

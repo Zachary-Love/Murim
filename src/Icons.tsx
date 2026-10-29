@@ -1,4 +1,4 @@
-import { STAGE_LABEL, type Stage, type Status } from "./types";
+import type { Status } from "./types";
 import logo from "./assets/logo-mark.svg";
 
 /** The logo blade slashing in, on a loop: Murim's loading state. */
@@ -7,29 +7,6 @@ export const Loading = ({ label, small }: { label: string; small?: boolean }) =>
 );
 
 const S = { width: 14, height: 14, viewBox: "0 0 14 14", fill: "none", strokeWidth: 1.5 } as const;
-
-// Linear-style stage icon: ring for todo, filling pie as the task advances, check when done.
-export const StateIcon = ({ stage, backlog }: { stage: Stage; backlog?: boolean }) => {
-  const pie = (f: number) => {
-    const a = 2 * Math.PI * f, x = 7 + 3.5 * Math.sin(a), y = 7 - 3.5 * Math.cos(a);
-    return `M7 7V3.5A3.5 3.5 0 ${f > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}z`;
-  };
-  return (
-    <svg {...S} className={`ico stage ${stage}`} stroke="currentColor">
-      <title>{STAGE_LABEL[stage]}</title>
-      {stage === "done" ? (
-        <><circle cx="7" cy="7" r="6" fill="currentColor" stroke="none" /><path d="M4.5 7.2l1.7 1.7 3.4-3.6" stroke="var(--bg)" strokeWidth="1.6" /></>
-      ) : (
-        <>
-          <circle cx="7" cy="7" r="5.5" strokeDasharray={backlog && stage === "todo" ? "2 2" : undefined} />
-          {stage === "progress" && <path d={pie(0.5)} fill="currentColor" stroke="none" />}
-          {stage === "needsReview" && <path d={pie(0.75)} fill="currentColor" stroke="none" />}
-          {stage === "codeReview" && <path d={pie(0.9)} fill="currentColor" stroke="none" />}
-        </>
-      )}
-    </svg>
-  );
-};
 
 export const AgentIcon = ({ status }: { status?: Status }) => {
   if (status === "starting" || status === "working") return <i className="ico spin" title="Agent working" />;
@@ -56,18 +33,6 @@ export const CoffeeIcon = () => (
 
 export const GearIcon = () => (
   <svg {...L}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" /></svg>
-);
-
-export const FlameIcon = () => (
-  <svg {...L}><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z" /></svg>
-);
-
-export const FolderIcon = () => (
-  <svg {...L}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
-);
-
-export const TasksIcon = () => (
-  <svg {...L}><path d="M9 6h11M9 12h11M9 18h11" /><path d="m3.5 6 1 1 2-2M3.5 12l1 1 2-2M3.5 18l1 1 2-2" /></svg>
 );
 
 export const ReviewsIcon = () => (

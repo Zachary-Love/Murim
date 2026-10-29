@@ -184,8 +184,6 @@ button.chip:hover { background: var(--hover); border-color: var(--line-hi); colo
 .pri sub { font-size: 9px; line-height: 1; color: var(--red); }
 .pri.red { color: var(--red); } .pri.amber { color: var(--amber); } .pri.blue { color: var(--blue); } .pri.green { color: var(--green); } .pri.grey { color: var(--dim); }
 @keyframes pulse { 50% { opacity: .45; } }
-.stage.todo { color: var(--text-2); } .stage.progress { color: var(--amber); } .stage.needsReview { color: #a78bfa; }
-.stage.codeReview { color: var(--green); } .stage.done { color: var(--blue); }
 
 /* pre-PR review */
 .review { display: flex; flex-direction: column; gap: 10px; }
@@ -471,9 +469,6 @@ button.chip:hover { background: var(--hover); border-color: var(--line-hi); colo
 .olog { margin: 0; height: max(280px, calc(100vh - 520px)); overflow: auto; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); font: 11px/1.55 var(--mono); color: var(--text-2); white-space: pre-wrap; word-break: break-word; }
 .pvi-move { flex: none; margin-left: auto; display: flex; align-items: center; gap: 6px; } /* wraps under a squeezed title, still right-aligned */
 .pvi-move select { height: 24px; font-size: 11px; padding: 0 6px; }
-.tasks .row:has(.row-pick) { flex-wrap: wrap; row-gap: 4px; height: auto; min-height: 30px; padding: 6px 8px; }
-.tasks .row-pick { flex-basis: 100%; display: flex; padding-left: 22px; }
-.tasks .row-pick .chip { height: 18px; font-size: 10px; padding: 0 7px 0 5px; }
 .pvi-term .pane > .term { margin: 0; padding: 0; border: 0; border-radius: 0; } /* inspector: terminal edge to edge */
 
 /* ⌘K command menu */

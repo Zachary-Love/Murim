@@ -5,10 +5,9 @@ import Settings, { SettingsNav, Section } from "./Settings";
 import { applyAppearance, withDefaults } from "./appearance";
 import Caffeine from "./Caffeine";
 import Updater from "./Updater";
-import { Item, Repo, Session, Mode, AgentKind, LogEntry, PrMap, SEV, OVERALL, ReviewPr, MedSel, Automation, AutoSel, Board, isAuto, sortItems, stage } from "./types";
-import { StateIcon, AgentIcon, PrIcon, GearIcon, RefreshIcon, FlameIcon, TasksIcon, ReviewsIcon, MeditationsIcon, ClockIcon, PavilionIcon } from "./Icons";
-import Pavilion, { PickPill } from "./Pavilion";
-import TaskPane from "./TaskPane";
+import { Session, LogEntry, ReviewPr, MedSel, Automation, AutoSel, Board, isAuto } from "./types";
+import { GearIcon, RefreshIcon, ReviewsIcon, MeditationsIcon, ClockIcon, PavilionIcon } from "./Icons";
+import Pavilion from "./Pavilion";
 import ReviewList from "./ReviewList";
 import ReviewPane from "./ReviewPane";
 import MeditationList, { useArtifacts } from "./MeditationList";
@@ -18,27 +17,19 @@ import AutomationPane, { RunPane, draft } from "./AutomationPane";
 import CommandMenu, { type Command } from "./CommandMenu";
 import logo from "./assets/logo-mark.svg";
 
-type Payload = { items: Item[]; error: string | null };
-type PrPayload = { prs: PrMap; error?: string | null };
 type RvPayload = { prs: ReviewPr[]; error: string | null; loaded: boolean };
-type View = "pavilion" | "tasks" | "reviews" | "meditations" | "automations";
-const KEYS: Record<string, View> = { p: "pavilion", t: "tasks", r: "reviews", m: "meditations", a: "automations" };
-const VIEW_NAME: Record<View, string> = { pavilion: "Pavilion", tasks: "Tasks", reviews: "Reviews", meditations: "Meditations", automations: "Automations" };
-const savedView = (): View => { try { const v = localStorage.getItem("murim.view"); return v === "tasks" || v === "reviews" || v === "meditations" || v === "automations" ? v : "pavilion"; } catch { return "pavilion"; } };
+type View = "pavilion" | "reviews" | "meditations" | "automations";
+const KEYS: Record<string, View> = { p: "pavilion", r: "reviews", m: "meditations", a: "automations" };
+const VIEW_NAME: Record<View, string> = { pavilion: "Pavilion", reviews: "Reviews", meditations: "Meditations", automations: "Automations" };
+const savedView = (): View => { try { const v = localStorage.getItem("murim.view"); return v === "reviews" || v === "meditations" || v === "automations" ? v : "pavilion"; } catch { return "pavilion"; } };
 
 export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<Section>("Appearance");
-  const [p, setP] = useState<Payload>({ items: [], error: null });
-  const [repos, setRepos] = useState<Repo[]>([]);
   const [sessions, setSessions] = useState<Record<string, Session>>({});
-  const [mode, setMode] = useState<Mode>("normal");
-  const [agent, setAgent] = useState<AgentKind>("claude");
   const [badge, setBadge] = useState<"count" | "dot" | "off">("count");
-  const [prs, setPrs] = useState<PrMap>({});
-  const [prErr, setPrErr] = useState<string | null>(null);
   const [logs, setLogs] = useState<Record<string, LogEntry[]>>({});
-  const [open, setOpen] = useState<string | null>(null);
+  const [focus, setFocus] = useState<{ id: string } | null>(null); // a Pavilion card (key or session id) to select; an object so the same id can refocus
   const [view, setView] = useState<View>(savedView);
   const [openReview, setOpenReview] = useState<string | null>(null); // a ReviewPr.key; kept apart from `open` so each mode keeps its selection
   const [rv, setRv] = useState<RvPayload>({ prs: [], error: null, loaded: false });
@@ -51,9 +42,9 @@ export default function App() {
   const med = useArtifacts(view === "meditations", sessions);
   const switchView = (v: View) => { setView(v); setShowSettings(false); try { localStorage.setItem("murim.view", v); } catch {} };
   const go = (v: View, id: string) => {
+    if (v === "pavilion") { switchView("pavilion"); setFocus({ id }); return; }
     switchView(v);
-    if (v === "tasks") setOpen(id);
-    else if (v === "reviews") setOpenReview(id);
+    if (v === "reviews") setOpenReview(id);
     else if (v === "meditations") setOpenMed({ kind: "session", id });
     else if (v === "automations") setOpenAuto({ kind: "run", id });
   };
@@ -79,12 +70,6 @@ export default function App() {
   useEffect(() => {
     invoke<Record<string, Session>>("get_sessions").then(setSessions).catch(() => {});
     const us = listen<Record<string, Session>>("sessions-updated", (e) => setSessions(e.payload));
-    invoke<Payload>("get_inbox").then(setP);
-    invoke<Repo[]>("list_repos").then(setRepos).catch(() => {});
-    const un = listen<Payload>("inbox-updated", (e) => { setP(e.payload); invoke<Repo[]>("list_repos").then(setRepos).catch(() => {}); });
-    const setPp = (v: PrPayload) => { setPrs(v.prs ?? {}); setPrErr(v.error ?? null); };
-    invoke<PrPayload>("get_prs").then(setPp).catch(() => {}); // ponytail: tolerate backend without get_prs
-    const up = listen<PrPayload>("prs-updated", (e) => setPp(e.payload));
     invoke<RvPayload>("get_reviews").then(setRv).catch(() => {});
     const ur = listen<RvPayload>("reviews-updated", (e) => { setRv(e.payload); setRvBusy(false); });
     invoke<Automation[]>("list_automations").then(setAutos).catch(() => {});
@@ -107,15 +92,14 @@ export default function App() {
     });
     const ul = listen<LogEntry>("tempering-log", (e) =>
       setLogs((l) => ({ ...l, [e.payload.issueId]: [e.payload, ...(l[e.payload.issueId] ?? [])].slice(0, 20) })));
-    return () => { mq.removeEventListener("change", onScheme); window.removeEventListener("murim-appearance", onLook); nav.then((f) => f()); window.removeEventListener("murim-badge", onBadge); ul.then((f) => f()); un.then((f) => f()); us.then((f) => f()); up.then((f) => f()); ur.then((f) => f()); ua.then((f) => f()); upv.then((f) => f()); };
+    return () => { mq.removeEventListener("change", onScheme); window.removeEventListener("murim-appearance", onLook); nav.then((f) => f()); window.removeEventListener("murim-badge", onBadge); ul.then((f) => f()); us.then((f) => f()); ur.then((f) => f()); ua.then((f) => f()); upv.then((f) => f()); };
   }, []);
 
   // re-read when Settings closes so a new default mode / agent applies without a restart
   useEffect(() => {
     if (showSettings) return;
-    invoke<{ default_permission_mode: Mode; agent: AgentKind; review_badge: typeof badge; repos_root: string }>("get_settings").then((s) => { setMode(s.default_permission_mode); setAgent(s.agent); setBadge(s.review_badge); setReposRoot(s.repos_root); }).catch(() => {});
+    invoke<{ review_badge: typeof badge; repos_root: string }>("get_settings").then((s) => { setBadge(s.review_badge); setReposRoot(s.repos_root); }).catch(() => {});
   }, [showSettings]);
-  const openItem = p.items.find((i) => i.issue.id === open);
   const requested = rv.prs.filter((r) => r.requested).length;
   const openPr = rv.prs.find((r) => r.key === openReview);
   const autoWaiting = Object.values(sessions).some((s) => isAuto(s.issueId) && s.status === "needsInput");
@@ -127,10 +111,10 @@ export default function App() {
   const commands: Command[] = [
     ...(Object.entries(KEYS) as [string, View][]).map(([k, v]) => ({ id: `go:${v}`, group: "Go to", label: VIEW_NAME[v], hint: `⌘${k.toUpperCase()}`, run: () => switchView(v) })),
     { id: "go:settings", group: "Go to", label: "Settings", hint: "⌘,", run: () => setShowSettings(true) },
-    { id: "act:refresh", group: "Action", label: "Refresh tasks, PRs and reviews", run: () => { ["refresh_inbox", "refresh_prs", "refresh_reviews"].forEach((c) => invoke(c).catch(() => {})); } },
+    { id: "act:refresh", group: "Action", label: "Refresh issues, PRs and reviews", run: () => { ["refresh_inbox", "refresh_prs", "refresh_reviews"].forEach((c) => invoke(c).catch(() => {})); } },
     { id: "act:pause", group: "Action", label: board.paused ? "Resume Pavilion" : "Pause Pavilion", run: () => { invoke("pavilion_set_paused", { paused: !board.paused }).catch(() => {}); } },
     { id: "act:automation", group: "Action", label: "New automation", run: () => { switchView("automations"); setOpenAuto({ kind: "automation", id: "" }); } },
-    ...p.items.map((i) => ({ id: `task:${i.issue.id}`, group: "Task", label: `${i.issue.identifier} ${i.issue.title}`, run: () => go("tasks", i.issue.id) })),
+    ...board.cards.filter((c) => c.source === "issue").map((c) => ({ id: `card:${c.key}`, group: "Issue", label: `${c.ident} ${c.title}`, run: () => go("pavilion", c.key) })),
     ...rv.prs.map((r) => ({ id: `review:${r.key}`, group: "Review", label: `${r.repo}#${r.number} ${r.health.title}`, run: () => go("reviews", r.key) })),
     ...autos.map((a) => ({ id: `auto:${a.id}`, group: "Automation", label: a.name, run: () => { switchView("automations"); setOpenAuto({ kind: "automation", id: a.id }); } })),
   ];
@@ -139,7 +123,6 @@ export default function App() {
     <div className="app">
       <nav className="rail" data-tauri-drag-region>
         <button className={`btn icon ${!showSettings && view === "pavilion" ? "on" : ""}`} title="Pavilion (⌘P)" onClick={() => switchView("pavilion")}><PavilionIcon />{needsYou > 0 && <span className="count attn badge">{needsYou}</span>}</button>
-        <button className={`btn icon ${!showSettings && view === "tasks" ? "on" : ""}`} title="Tasks (⌘T)" onClick={() => switchView("tasks")}><TasksIcon /></button>
         <button className={`btn icon ${!showSettings && view === "reviews" ? "on" : ""}`} title="Reviews (⌘R)" onClick={() => switchView("reviews")}><ReviewsIcon />{requested > 0 && badge !== "off" && (badge === "dot" ? <span className="dot-req badge-dot" /> : <span className="count attn badge">{requested}</span>)}</button>
         <button className={`btn icon ${!showSettings && view === "meditations" ? "on" : ""}`} title="Meditations (⌘M)" onClick={() => switchView("meditations")}><MeditationsIcon /></button>
         <button className={`btn icon ${!showSettings && view === "automations" ? "on" : ""}`} title="Automations (⌘A)" onClick={() => switchView("automations")}><ClockIcon />{autoWaiting && <span className="dot-req badge-dot" />}</button>
@@ -163,35 +146,11 @@ export default function App() {
         ) : view === "reviews" ? <>
         <div className="section-label">Reviews <span className="count">{rv.prs.length}</span><button className="btn ghost new" title="Refresh reviews" onClick={() => { setRvBusy(true); invoke("refresh_reviews").catch(() => setRvBusy(false)); }}><RefreshIcon /></button></div>
         <ReviewList prs={rv.prs} error={rv.error} loading={!rv.loaded || rvBusy} open={showSettings ? null : openReview} onOpen={(k) => { setOpenReview(k); setShowSettings(false); }} />
-        </> : <>
-        <div className="section-label">My tasks <span className="count">{p.items.length}</span><button className="btn ghost new" title="Refresh tasks" onClick={() => invoke("refresh_inbox").catch(() => {})}><RefreshIcon /></button></div>
-        {p.error && <div className="banner">{p.error}</div>}
-        {prErr && <div className="banner">{prErr}</div>}
-        <ul className="tasks">
-          {sortItems(p.items, sessions, prs).map((i) => {
-            const id = i.issue.id, se = sessions[id], pr = prs[id], card = board.cards.find((c) => c.key === id);
-            return (
-              <li key={id}>
-                <button className={`row ${open === id && !showSettings ? "on" : ""} ${se?.status === "needsInput" ? "attn" : ""}`} title={i.issue.title}
-                onClick={() => { setOpen(id); setShowSettings(false); }}>
-                <StateIcon stage={stage(i, se, pr)} backlog={i.issue.stateType === "backlog"} />
-                <span className="ident">{i.issue.identifier}</span>
-                <span className="t">{i.issue.title}</span>
-                <AgentIcon status={se?.status} />
-                {se?.tempering && <span title="Tempering"><FlameIcon /></span>}
-                {pr && <PrIcon color={SEV[pr.overall] ?? "grey"} n={se?.escalations?.length} title={`${OVERALL[pr.overall] ?? pr.overall} #${pr.number}`} />}
-                {card?.pick && <span className="row-pick"><PickPill c={card} /></span>}
-                </button>
-              </li>
-            );
-          })}
-          {!p.items.length && <li className="empty">No tasks in your active cycle</li>}
-        </ul>
-        </>}
+        </> : null}
       </aside>
       )}
       <main className="main">
-        {showSettings ? <Settings tab={settingsTab} /> : view === "pavilion" ? <Pavilion board={board} sessions={sessions} logs={logs} onOpen={(v, id) => go(v as View, id)} /> : view === "automations" ? (
+        {showSettings ? <Settings tab={settingsTab} /> : view === "pavilion" ? <Pavilion board={board} sessions={sessions} logs={logs} focus={focus} onOpen={(v, id) => go(v as View, id)} /> : view === "automations" ? (
           editAuto ? <AutomationPane key={openAuto!.id} auto={editAuto} sessions={sessions} onOpen={setOpenAuto}
             onSaved={(a) => { setAutos((l) => l.some((x) => x.id === a.id) ? l.map((x) => x.id === a.id ? a : x) : [...l, a]); setOpenAuto({ kind: "automation", id: a.id }); }} />
           : openAuto?.kind === "run" ? <RunPane key={openAuto.id} id={openAuto.id} auto={runAuto} session={sessions[openAuto.id]} />
@@ -203,9 +162,7 @@ export default function App() {
         ) : view === "reviews" ? (openPr
           ? <ReviewPane key={openPr.key} pr={openPr} session={sessions[openPr.sessionId]} />
           : <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Select a pull request to review.</p></div>
-        ) : openItem ? (
-          <TaskPane key={openItem.issue.id} item={openItem} session={sessions[openItem.issue.id]} pr={prs[openItem.issue.id]} log={logs[openItem.issue.id] ?? []} repos={repos} defaultMode={mode} agent={agent} />
-        ) : <div className="empty-state"><img className="logo-lg" src={logo} alt="" /><p>Select a task to start working on it.</p></div>}
+        ) : null}
       </main>
       {cmdk && <CommandMenu commands={commands} onClose={() => setCmdk(false)} />}
     </div>

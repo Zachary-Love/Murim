@@ -280,7 +280,7 @@ pub fn combine(gh: Result<(String, Vec<ReviewPr>), String>, team: Result<Vec<Rev
 }
 
 /// `list`: GitHub logins separated by commas or whitespace, an optional leading @, any case.
-fn blocked(login: &str, list: &str) -> bool {
+fn listed(login: &str, list: &str) -> bool {
     list.split(|c: char| c == ',' || c.is_whitespace()).any(|b| !b.is_empty() && b.trim_start_matches('@').eq_ignore_ascii_case(login))
 }
 
@@ -300,8 +300,8 @@ fn poll(app: &AppHandle) {
                 Err(e) => p.error = Some(p.error.map_or(e.clone(), |o| format!("{o}; {e}"))),
             }
             // reviewed_elsewhere bypasses combine's own-PR filter, so filter again with the user's blocklist
-            let block = crate::settings::dir(app).map(|d| crate::settings::load(&d).review_blocklist).unwrap_or_default();
-            p.prs.retain(|x| x.author_login != me && !blocked(&x.author_login, &block));
+            let (block, only) = crate::settings::dir(app).map(|d| crate::settings::load(&d)).map(|c| (c.review_blocklist, c.review_allowlist)).unwrap_or_default();
+            p.prs.retain(|x| x.author_login != me && !listed(&x.author_login, &block) && (only.trim().is_empty() || listed(&x.author_login, &only)));
             link_by_branch(app, &mut p.prs);
             p
         }
@@ -574,11 +574,11 @@ mod tests {
     }
 
     #[test]
-    fn blocklist_matches_logins() {
-        assert!(blocked("Zachary-Love", "bob, @zachary-love"));
-        assert!(blocked("bob", "amy\nbob"));
-        assert!(!blocked("bobby", "bob"));
-        assert!(!blocked("", ""));
+    fn login_lists_match() {
+        assert!(listed("Zachary-Love", "bob, @zachary-love"));
+        assert!(listed("bob", "amy\nbob"));
+        assert!(!listed("bobby", "bob"));
+        assert!(!listed("", ""));
     }
 
     #[test]

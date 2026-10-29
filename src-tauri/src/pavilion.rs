@@ -740,7 +740,7 @@ fn reconcile(app: &AppHandle) {
             let plan_stage = rec.investigation.as_ref().is_some_and(|x| x.status == InvStatus::PlanReady);
             cards.push(Card {
                 key: i.id.clone(), column: dec.column, ident: i.identifier.clone(), title: i.title.clone(), repo: it.repo.as_ref().map(|r| repo_name(&r.path)).unwrap_or_default(),
-                priority: i.priority, reason: dec.reason, by: dec.by, action: dec.action, view: "tasks".into(), target: i.id.clone(), pr: prs.get(&i.id).cloned(),
+                priority: i.priority, reason: dec.reason, by: dec.by, action: dec.action, view: "pavilion".into(), target: i.id.clone(), pr: prs.get(&i.id).cloned(),
                 session: if v.session.is_some() { Some(i.id.clone()) } else { inv.map(|_| inv_id(&i.id)) }, plan: rec.investigation.as_ref().filter(|x| x.status == InvStatus::PlanReady).map(|x| x.plan.clone()), updated_at: i.updated_at.clone(),
                 source: Source::Issue, stage: Some(stage_of(&v)), role: role_of(&v), summary: summary_of(&i.description), url: i.url.clone(),
                 verdict: dec.by.and(if dec.action == Some(Action::DismissBlocker) { rec.blocker.clone() } else if plan_stage { rec.plan_check.clone() } else { rec.ready.clone() }),
@@ -882,7 +882,7 @@ fn start_issue(app: &AppHandle, issue_id: &str) -> Result<(), String> {
     if cfg.pavilion.plan_first {
         start_investigation(app, issue_id)
     } else {
-        sessions::start_task(app.clone(), issue_id.to_string(), cfg.default_permission_mode)
+        sessions::start_task(app.clone(), issue_id.to_string(), None)
     }
 }
 
@@ -1045,7 +1045,7 @@ pub fn pavilion_approve(app: AppHandle, issue_id: String, plan: String) -> Resul
     }
     set_investigation(&app, &issue_id, InvStatus::Approved, plan.clone());
     let mode = settings::load(&settings::dir(&app)?).default_permission_mode;
-    if let Err(e) = sessions::start_task(app.clone(), issue_id.clone(), mode) {
+    if let Err(e) = sessions::start_task(app.clone(), issue_id.clone(), Some(mode)) {
         set_investigation(&app, &issue_id, InvStatus::PlanReady, plan);
         return Err(e);
     }

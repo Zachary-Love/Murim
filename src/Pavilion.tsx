@@ -42,8 +42,8 @@ export const PickPill = ({ c }: { c: Card }) => c.pick ? <span className={`chip 
 
 const Avatar = ({ c }: { c: Card }) => c.role ? <><span className="pv-av">{ROLE_LABEL[c.role][0]}</span><span>{ROLE_LABEL[c.role]}</span></> : null;
 
-export default function Pavilion({ board, sessions, logs, onOpen }: {
-  board: Board; sessions: Record<string, Session>; logs: Record<string, LogEntry[]>; onOpen: (view: string, id: string) => void;
+export default function Pavilion({ board, sessions, logs, focus, onOpen }: {
+  board: Board; sessions: Record<string, Session>; logs: Record<string, LogEntry[]>; focus?: { id: string } | null; onOpen: (view: string, id: string) => void;
 }) {
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [mode, setMode] = useState<Mode>(() => (localStorage.getItem(KEY) === "board" ? "board" : "list"));
@@ -100,6 +100,8 @@ export default function Pavilion({ board, sessions, logs, onOpen }: {
   const setView = (m: Mode) => { setMode(m); localStorage.setItem(KEY, m); };
   const set = (p: Partial<Filters>) => setFilters((f) => ({ ...f, ...p }));
   const pick = (c: Card) => { setSel(c.key); if (narrow) setDrawer(true); };
+  // menu bar / ⌘K: select the card by its key or its agent's session id
+  useEffect(() => { const c = focus && board.cards.find((x) => x.key === focus.id || x.session === focus.id); if (c) pick(c); }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const shown = filterCards(board.cards, filters);
   const card = board.cards.find((c) => c.key === sel) ?? shown[0] ?? board.cards[0];

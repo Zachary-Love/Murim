@@ -4,7 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import AppearanceSettings from "./AppearanceSettings";
 import { MODE_LABEL, AgentKind, ReplyMode } from "./types";
 
-type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; pr_prompt: string; bedrock: boolean; aws_region: string; aws_profile: string; review_prompt: string; review_blocklist: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { local_model: boolean; ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_temper: boolean; auto_investigate: boolean; auto_review: boolean; plan_first: boolean; claude_check: "always" | "lowConfidence" | "off"; auto_approve_at: number } };
+type S = { agent: AgentKind; agent_command: string; repos_root: string; meditations_dir: string; default_permission_mode: "normal" | "allowlist" | "skip"; caffeine: boolean; default_prompt: string; pr_prompt: string; bedrock: boolean; aws_region: string; aws_profile: string; review_prompt: string; review_blocklist: string; review_allowlist: string; reply_mode: ReplyMode; review_badge: "count" | "dot" | "off"; pavilion: { local_model: boolean; ollama_url: string; model: string; max_agents: number; docker_slots: number; auto_temper: boolean; auto_investigate: boolean; auto_review: boolean; plan_first: boolean; claude_check: "always" | "lowConfidence" | "off"; auto_approve_at: number } };
 
 export const SECTIONS = ["Appearance", "Prompts", "Folders", "AI", "Pavilion", "Orchestrator Log", "Accounts"] as const;
 export type Section = typeof SECTIONS[number];
@@ -234,6 +234,9 @@ export default function Settings({ tab }: { tab: Section }) {
       </label>
       <label>Never review PRs by
         <input value={s.review_blocklist} placeholder="GitHub usernames, comma separated, e.g. Zachary-Love, dependabot" onChange={(e) => setS({ ...s, review_blocklist: e.target.value })} />
+      </label>
+      <label>Only review PRs by
+        <input value={s.review_allowlist} placeholder="Empty: everyone not blocked above. GitHub usernames, comma separated" onChange={(e) => setS({ ...s, review_allowlist: e.target.value })} />
       </label>
       <label>Plan before coding
         <select value={pv.plan_first ? "on" : "off"} onChange={(e) => set({ plan_first: e.target.value === "on" })}>

@@ -53,6 +53,11 @@ export default function Terminal({ issueId }: { issueId: string }) {
     const kitty = () => ((term as unknown as { _core?: { coreService?: { kittyKeyboard?: { flags?: number } } } })._core?.coreService?.kittyKeyboard?.flags ?? 0) > 0;
     term.attachCustomKeyEventHandler((e) => {
       if (e.isComposing) return true;
+      // ⌘C, or Ctrl+C over a selection, copies (Ctrl+C with nothing selected still interrupts the agent)
+      if (e.key === "c" && !e.altKey && !e.shiftKey && (e.metaKey !== e.ctrlKey) && term.hasSelection()) {
+        if (e.type === "keydown") { e.preventDefault(); navigator.clipboard.writeText(term.getSelection()).catch(() => {}); term.clearSelection(); }
+        return false;
+      }
       const k = macKey(e, kitty());
       if (k === null) return true;
       if (e.type === "keydown") {
